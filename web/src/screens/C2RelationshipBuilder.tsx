@@ -147,22 +147,48 @@ export default function C2RelationshipBuilder() {
 
   return (
     <div className="min-h-screen bg-canvas">
-      <WizardChrome current={3} isMobile={isMobile} maxWidth={1180} onBack={() => showToast("이전 화면으로 돌아갑니다")} onSaveDraft={() => showToast("임시저장됨")} />
+      <WizardChrome current={3} isMobile={isMobile} onBack={() => showToast("이전 화면으로 돌아갑니다")} onSaveDraft={() => showToast("임시저장됨")} />
 
       <div
         className="mx-auto box-border w-full"
         style={
           isDesktop
-            ? { display: "flex", gap: 24, alignItems: "flex-start", maxWidth: 1180, padding: "24px 24px 32px" }
-            : { display: "flex", flexDirection: "column", gap: 20, maxWidth: 720, padding: "20px 16px 120px" }
+            ? { display: "flex", gap: 32, alignItems: "flex-start", maxWidth: 1120, padding: "32px 24px 56px" }
+            : { display: "flex", flexDirection: "column", gap: 16, maxWidth: 680, padding: "24px 16px 132px" }
         }
       >
         {/* ── CANVAS ── */}
         <div className={isDesktop ? "min-w-0 flex-1" : "w-full"}>
-          <div className="mb-2.5 flex flex-wrap items-baseline justify-between gap-1.5">
+          <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
             <div>
-              <div className="text-[22px] font-bold tracking-[-0.4px] text-ink">관계도</div>
-              <div className="mt-[3px] text-[13px] text-muted">인물을 끌어 배치하고, 관계선을 눌러 편집해요. 회차별 변화도 기록할 수 있어요.</div>
+              <div className="text-2xl font-bold tracking-[-0.4px] text-ink">관계도</div>
+              <div className="mt-1 text-sm text-muted">3단계 · 인물을 끌어 배치하고, 관계선을 눌러 편집해요.</div>
+            </div>
+            <div className="flex flex-shrink-0 items-center gap-2">
+              {autoLoading ? (
+                <button disabled className="inline-flex h-[38px] items-center gap-2 rounded border border-line2 bg-white px-3.5 text-[13px] font-bold text-brand opacity-70 shadow-[0_1px_3px_rgba(0,0,0,0.06)]" style={{ cursor: "default" }}>
+                  <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-brand/30 border-t-brand" />
+                  추천 중...
+                </button>
+              ) : (
+                <button onClick={autoRecommend} className="inline-flex h-[38px] items-center gap-[7px] rounded border border-line2 bg-white px-3.5 text-[13px] font-bold text-brand shadow-[0_1px_3px_rgba(0,0,0,0.06)] transition hover:bg-wash">
+                  ✦ 자동 추천
+                </button>
+              )}
+              <button
+                onClick={addEdge}
+                disabled={!enoughNodes}
+                className={
+                  "h-[38px] rounded px-3.5 text-[13px] font-bold transition " +
+                  (!enoughNodes
+                    ? "cursor-default border border-hairline bg-hairline text-muted"
+                    : edges.length === 0
+                    ? "bg-brand text-white shadow-cta"
+                    : "border border-line2 bg-white text-brand shadow-[0_1px_3px_rgba(0,0,0,0.06)]")
+                }
+              >
+                + 관계 추가
+              </button>
             </div>
           </div>
 
@@ -256,42 +282,29 @@ export default function C2RelationshipBuilder() {
               </div>
             )}
 
-            {/* toolbar: auto recommend */}
-            <div className="absolute right-3.5 top-3.5 z-[3]">
-              {autoLoading ? (
-                <button disabled className="inline-flex h-[38px] items-center gap-2 rounded border border-line2 bg-white px-3.5 text-[13px] font-bold text-brand shadow-[0_1px_3px_rgba(0,0,0,0.06)]" style={{ cursor: "default" }}>
-                  <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-brand/30 border-t-brand" />
-                  추천 중...
-                </button>
-              ) : (
-                <button onClick={autoRecommend} className="inline-flex h-[38px] items-center gap-[7px] rounded border border-line2 bg-white px-3.5 text-[13px] font-bold text-brand shadow-[0_1px_3px_rgba(0,0,0,0.06)] transition hover:bg-wash">
-                  ✦ 자동 추천
-                </button>
-              )}
-            </div>
+          </div>
 
-            {/* toolbar: add edge */}
-            <div className="absolute bottom-3.5 left-3.5 z-[3]">
+          {/* DESKTOP nav */}
+          {!isMobile && (
+            <div className="mt-5 flex items-center justify-between gap-3.5">
               <button
-                onClick={addEdge}
-                disabled={!enoughNodes}
-                className={
-                  "h-10 rounded px-4 text-sm font-bold transition " +
-                  (!enoughNodes
-                    ? "cursor-default border-none bg-hairline text-muted"
-                    : edges.length === 0
-                    ? "border-none bg-brand text-white shadow-cta"
-                    : "border border-line2 bg-white text-brand shadow-[0_1px_3px_rgba(0,0,0,0.06)]")
-                }
+                onClick={() => showToast("② 서사설정 단계로 이동합니다")}
+                className="h-14 rounded border border-line2 bg-white px-[22px] text-base font-bold text-ink2 transition hover:border-wash-2 hover:bg-wash hover:text-brand"
               >
-                + 관계 추가
+                ← 이전: 서사설정
+              </button>
+              <button
+                onClick={() => showToast("④ 출력설정 단계로 이동합니다")}
+                className="pw-btn-primary h-14 px-7 text-lg"
+              >
+                다음: 출력설정 →
               </button>
             </div>
-          </div>
+          )}
         </div>
 
         {/* ── EDIT PANEL ── */}
-        <div className={isDesktop ? "w-[368px] flex-shrink-0" : "w-full"}>
+        <div className={isDesktop ? "w-[336px] flex-shrink-0" : "w-full"}>
           <div className="pw-card p-[22px]">
             <div className="mb-1 text-base font-bold text-ink">관계 편집</div>
 
@@ -314,21 +327,11 @@ export default function C2RelationshipBuilder() {
         </div>
       </div>
 
-      {/* DESKTOP bottom bar */}
-      {!isMobile && (
-        <div className="border-t border-hairline bg-white">
-          <div className="mx-auto flex items-center justify-between px-6 py-4" style={{ maxWidth: 1180 }}>
-            <button onClick={() => showToast("② 서사설정 단계로 이동합니다")} className="pw-btn-slight h-[52px] px-[22px] text-base">← 이전</button>
-            <button onClick={() => showToast("✦ 1회차 생성을 시작합니다")} className="pw-btn-primary h-14 px-8 text-lg shadow-cta">✦ 1회차 생성하기</button>
-          </div>
-        </div>
-      )}
-
       {/* MOBILE fixed bar */}
       {isMobile && (
         <div className="fixed inset-x-0 bottom-0 z-30 flex items-center gap-2.5 border-t border-hairline bg-white px-4 py-3 shadow-[0_-2px_12px_rgba(0,0,0,0.04)]">
-          <button onClick={() => showToast("② 서사설정 단계로 이동합니다")} className="pw-btn-slight h-[52px] flex-shrink-0 px-[18px] text-[15px]">← 이전</button>
-          <button onClick={() => showToast("✦ 1회차 생성을 시작합니다")} className="pw-btn-primary h-[52px] flex-1 text-base">✦ 1회차 생성하기</button>
+          <button onClick={() => showToast("② 서사설정 단계로 이동합니다")} className="h-[54px] flex-shrink-0 rounded border border-line2 bg-white px-[18px] text-[15px] font-bold text-ink2">← 이전</button>
+          <button onClick={() => showToast("④ 출력설정 단계로 이동합니다")} className="pw-btn-primary h-[54px] flex-1 text-base">다음: 출력설정 →</button>
         </div>
       )}
 
