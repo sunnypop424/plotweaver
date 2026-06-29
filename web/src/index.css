@@ -1,0 +1,202 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    margin: 0;
+    background: #f7f7f7;
+    color: #121212;
+    -webkit-font-smoothing: antialiased;
+    font-family: Pretendard, -apple-system, BlinkMacSystemFont, system-ui,
+      "Noto Sans KR", sans-serif;
+  }
+  #root {
+    min-height: 100vh;
+  }
+}
+
+/* C3 등에서 inline animation 으로 참조하는 키프레임 */
+@keyframes pw-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes pw-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+@keyframes pw-fade {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes pw-shim {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+/* 모달·시트·온보딩 등장 애니메이션 (여러 화면에서 inline으로 참조) */
+@keyframes pw-pop {
+  from { opacity: 0; transform: scale(0.95) translateY(6px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes pw-sheet {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pw-fill {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pw-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pw-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [style*="pw-float"] { animation: none !important; }
+}
+
+/* 스켈레톤 shimmer 라인 */
+.pw-skel {
+  height: 18px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #eeeeee 25%, #f6f6f6 37%, #eeeeee 63%);
+  background-size: 200% 100%;
+  animation: pw-shim 1.5s linear infinite;
+}
+
+/* 랜딩(L) 모션 */
+@keyframes pw-fadeup {
+  from { transform: translateY(16px); }
+  to { transform: translateY(0); }
+}
+@keyframes pw-drift-down {
+  from { transform: translateY(-26px); }
+  to { transform: translateY(24px); }
+}
+@keyframes pw-drift-up {
+  from { transform: translateY(24px); }
+  to { transform: translateY(-26px); }
+}
+@keyframes pw-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+@keyframes pw-bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(8px); }
+}
+.pw-reveal.in {
+  animation: pw-fadeup 0.6s ease both;
+}
+/* 책 표지 타일 hover lift+glow (회전값은 --rot 로 보존) */
+.pw-cover {
+  transform: rotate(var(--rot, 0deg));
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.pw-cover:hover {
+  transform: translateY(-6px) scale(1.04) rotate(var(--rot, 0deg));
+  box-shadow: 0 14px 36px rgba(129, 107, 255, 0.45);
+  z-index: 5;
+}
+/* 가로 캐러셀 스크롤바 */
+.pw-scroll::-webkit-scrollbar { height: 8px; }
+.pw-scroll::-webkit-scrollbar-thumb {
+  background: #e3e3e3;
+  border-radius: 9999px;
+  border: 2px solid #fff;
+  background-clip: content-box;
+}
+.pw-scroll::-webkit-scrollbar-track { background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pw-drift,
+  .pw-reveal.in,
+  .pw-bounce {
+    animation: none !important;
+  }
+}
+
+/* DESIGN.md 컴포넌트 토큰을 재사용 클래스로 (반복 제거) */
+@layer components {
+  .pw-card {
+    @apply bg-white border border-hairline rounded-lg;
+  }
+
+  /* 입력류: 4px 라운드, focus 시 brand 링 */
+  .pw-input {
+    @apply w-full h-12 box-border px-3.5 rounded border border-hairline bg-white
+      text-base text-ink outline-none transition;
+  }
+  .pw-input:focus {
+    @apply border-brand shadow-focus;
+  }
+  .pw-input--err {
+    @apply border-error shadow-focus-error;
+  }
+  .pw-select {
+    @apply pw-input pr-9 appearance-none cursor-pointer;
+  }
+
+  /* 버튼류: 4px 라운드, 700 weight */
+  .pw-btn {
+    @apply inline-flex items-center justify-center gap-2 rounded font-bold
+      cursor-pointer transition border-none;
+  }
+  .pw-btn-primary {
+    @apply pw-btn bg-brand text-white;
+  }
+  .pw-btn-primary:hover {
+    @apply bg-brand-hover;
+  }
+  .pw-btn-slight {
+    @apply pw-btn bg-wash text-brand;
+  }
+  .pw-btn-slight:hover {
+    @apply bg-wash-2;
+  }
+  .pw-btn-ghost {
+    @apply pw-btn bg-transparent text-ink2;
+  }
+  .pw-btn-ghost:hover {
+    @apply bg-wash text-brand;
+  }
+  .pw-btn-disabled {
+    @apply pw-btn bg-hairline text-muted cursor-default;
+  }
+
+  .pw-link {
+    @apply bg-transparent border-none text-brand text-[13px] font-bold cursor-pointer p-0;
+  }
+
+  .pw-field-label {
+    @apply text-[13px] font-bold text-ink2;
+  }
+
+  /* select 우측 ▼ 표식 래퍼 */
+  .pw-select-wrap {
+    @apply relative;
+  }
+  .pw-select-caret {
+    @apply absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted text-[10px];
+  }
+}

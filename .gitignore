@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+build/
+
+# env
+.env
+.env.*
+
+# python (engine_poc)
+__pycache__/
+*.pyc
+.venv/
+venv/
+engine_poc/output/
+
+# claude tooling / local state
+.claude/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
