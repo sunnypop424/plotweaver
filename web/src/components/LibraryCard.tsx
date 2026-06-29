@@ -1,4 +1,4 @@
-import { coverGradient } from "./CoverTile";
+import { coverGradient } from "@/components/CoverTile";
 
 /**
  * 작업실 작품 카드 (D1). 16:9 표지 헤더 + 진행률 + 상태 배지 + 빠른 액션.

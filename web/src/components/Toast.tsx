@@ -1,19 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createContext, useContext } from "react";
 
-/** 화면 하단 중앙 토스트 (DESIGN.md §toast) + 호출 훅. */
-export function useToast() {
-  const [toast, setToast] = useState<string | null>(null);
-  const timer = useRef<number | undefined>(undefined);
+/** 화면 하단 중앙 토스트 (DESIGN.md §toast). 상태는 ToastProvider가 보유, 호출은 useToast(). */
+type ToastCtx = { showToast: (msg: string) => void };
+export const ToastContext = createContext<ToastCtx | null>(null);
 
-  const showToast = useCallback((msg: string) => {
-    if (timer.current) window.clearTimeout(timer.current);
-    setToast(msg);
-    timer.current = window.setTimeout(() => setToast(null), 2600);
-  }, []);
-
-  useEffect(() => () => window.clearTimeout(timer.current), []);
-
-  return { toast, showToast };
+export function useToast(): ToastCtx {
+  const ctx = useContext(ToastContext);
+  return ctx ?? { showToast: () => {} }; // Provider 밖에서는 no-op 폴백
 }
 
 export function Toast({ message }: { message: string | null }) {

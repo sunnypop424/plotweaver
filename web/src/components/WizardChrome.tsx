@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
 
-/** 위저드 공통 chrome: 상단 바 + 4스텝 인디케이터 (C1·C2 공유). */
+/** 위저드 공통 chrome: 상단 바 + 5스텝 인디케이터 (C0~C4 공유). */
 
-const STEPS = ["기본설정", "서사설정", "관계도", "출력설정"];
+const STEPS = ["세계관", "기본설정", "서사설정", "관계도", "출력설정"];
 
 type Props = {
-  /** 현재 단계 (1~4) */
+  /** 현재 단계 (1~5) */
   current: number;
   isMobile: boolean;
   maxWidth?: number;
@@ -102,7 +102,7 @@ function MobileStepper({ current }: { current: number }) {
           </div>
           <span className="text-[15px] font-bold text-ink">{STEPS[current - 1]}</span>
         </div>
-        <span className="text-[13px] font-bold text-muted">{current} / 4</span>
+        <span className="text-[13px] font-bold text-muted">{current} / {STEPS.length}</span>
       </div>
       <div className="mt-2.5 flex gap-1.5">
         {STEPS.map((_, i) => (
