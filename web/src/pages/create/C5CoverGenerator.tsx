@@ -26,6 +26,8 @@ export default function C5CoverGenerator() {
   const [includeTitle, setIncludeTitle] = useState(false);
   const [includeAuthor, setIncludeAuthor] = useState(false);
   const [authorName, setAuthorName] = useState("");
+  const [extraPrompt, setExtraPrompt] = useState("");
+  const [refFiles, setRefFiles] = useState<{ preview: string; b64: string }[]>([]);
   const [status, setStatus] = useState<Status>("idle");
   const [coverUrls, setCoverUrls] = useState<string[]>([]);
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -56,6 +58,43 @@ export default function C5CoverGenerator() {
   const effectiveStyle = style.custom ? style.text : style.value;
   const effectiveTone = tone.custom ? tone.text : tone.value;
 
+  // 이미지를 max 640px로 리사이즈해 jpeg base64로 변환
+  const resizeToB64 = (file: File): Promise<string> =>
+    new Promise((resolve) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => {
+        const MAX = 640;
+        const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = w; canvas.height = h;
+        canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
+        URL.revokeObjectURL(url);
+        resolve(canvas.toDataURL("image/jpeg", 0.75));
+      };
+      img.src = url;
+    });
+
+  const addRefImages = async (files: FileList) => {
+    const remain = 3 - refFiles.length;
+    if (remain <= 0) return;
+    const targets = Array.from(files).slice(0, remain);
+    const converted = await Promise.all(targets.map(async (f) => ({
+      preview: URL.createObjectURL(f),
+      b64: await resizeToB64(f),
+    })));
+    setRefFiles((prev) => [...prev, ...converted]);
+  };
+
+  const removeRefImage = (idx: number) => {
+    setRefFiles((prev) => {
+      URL.revokeObjectURL(prev[idx].preview);
+      return prev.filter((_, i) => i !== idx);
+    });
+  };
+
   const run = async () => {
     if (status === "loading" || !novelId) return;
     setStatus("loading");
@@ -77,6 +116,8 @@ export default function C5CoverGenerator() {
         includeChar,
         featuredCharNames: includeChar && featuredCharNames !== null ? featuredCharNames : undefined,
         authorName: includeAuthor ? authorName : undefined,
+        extraPrompt: extraPrompt.trim() || undefined,
+        refImages: refFiles.length > 0 ? refFiles.map((f) => f.b64) : undefined,
       });
       setCoverUrls(res.cover_urls?.length ? res.cover_urls : [res.cover_url]);
       setSelectedIdx(0);
@@ -251,6 +292,53 @@ export default function C5CoverGenerator() {
                     style={{ animation: "pw-fade .15s ease" }}
                   />
                 )}
+              </div>
+            </div>
+
+            {/* 추가 설정 */}
+            <div className="mb-[22px] border-t border-hairline pt-[18px]">
+              <div className="mb-3 text-[13px] font-bold text-ink">추가 설정 <span className="font-normal text-muted">(선택)</span></div>
+
+              {/* 추가 프롬프트 */}
+              <div className="mb-3.5">
+                <div className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.06em] text-muted">추가 프롬프트</div>
+                <textarea
+                  value={extraPrompt}
+                  onChange={(e) => setExtraPrompt(e.target.value)}
+                  rows={3}
+                  placeholder={"예: 전신 샷, 역광, 학교 옥상 배경\n힘차게 달리는 자세, 카메라 정면을 응시"}
+                  className="w-full resize-none rounded-lg border border-hairline px-3 py-2.5 text-[13px] leading-relaxed text-ink outline-none transition placeholder:text-muted/50 focus:border-brand focus:shadow-focus"
+                />
+              </div>
+
+              {/* 참고 이미지 */}
+              <div>
+                <div className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.06em] text-muted">참고 이미지 <span className="font-normal normal-case">(최대 3장)</span></div>
+                <div className="flex flex-wrap gap-2">
+                  {refFiles.map((f, i) => (
+                    <div key={i} className="group relative h-[62px] w-[62px] overflow-hidden rounded-lg border border-hairline">
+                      <img src={f.preview} alt="" className="h-full w-full object-cover" />
+                      <button
+                        onClick={() => removeRefImage(i)}
+                        className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 text-white text-lg font-bold transition group-hover:opacity-100"
+                      >×</button>
+                    </div>
+                  ))}
+                  {refFiles.length < 3 && (
+                    <label className="flex h-[62px] w-[62px] cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-hairline bg-canvas text-muted transition hover:border-brand hover:text-brand">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        multiple
+                        className="hidden"
+                        onChange={(e) => e.target.files && addRefImages(e.target.files)}
+                      />
+                      <span className="text-xl leading-none">+</span>
+                      <span className="text-[9px] font-bold uppercase tracking-wide">사진</span>
+                    </label>
+                  )}
+                </div>
+                <div className="mt-1.5 text-[11px] leading-snug text-muted">의상, 배경 등을 올리면 GPT가 스타일을 분석해 반영해요</div>
               </div>
             </div>
 

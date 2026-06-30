@@ -10,7 +10,8 @@ export type WMapEdge  = { id: number; from: number; to: number; label: string; l
 type WizardState = NovelSettings & {
   novelId: string | null;
   chapterContent: string | null;
-  editingNovelId: string | null;  // null=생성 모드, 값=편집 모드
+  editingNovelId: string | null;
+  returnTo: string | null;        // 편집 완료 후 돌아갈 경로
   // C0 full objects for back-navigation restoration
   worldFactionsData: WFaction[];
   worldRanksData: WRank[];
@@ -53,6 +54,7 @@ const DEFAULT: WizardState = {
   novelId: null,
   chapterContent: null,
   editingNovelId: null,
+  returnTo: null,
 };
 
 const DRAFT_KEY = "pw_wizard_draft";
@@ -109,7 +111,7 @@ interface WizardContextValue {
   setNovelId: (id: string) => void;
   setChapterContent: (text: string) => void;
   reset: () => void;
-  loadFromNovel: (novelId: string, settings: NovelSettings) => void;
+  loadFromNovel: (novelId: string, settings: NovelSettings, returnTo?: string) => void;
   clearEditMode: () => void;
 }
 
@@ -147,12 +149,12 @@ export function WizardProvider({ children }: { children: ReactNode }) {
   };
   const discardDraft = () => { clearDraft(); setPendingDraft(null); };
 
-  const loadFromNovel = useCallback((novelId: string, settings: NovelSettings) => {
-    // 기존 draft 삭제 (편집 시작 시 충돌 방지)
+  const loadFromNovel = useCallback((novelId: string, settings: NovelSettings, returnTo?: string) => {
     clearDraft();
     setPendingDraft(null);
 
-    // DB settings를 DEFAULT에 merge — 누락 필드는 DEFAULT로 채움
+    // DB settings를 WizardState로 캐스팅해 C0 full objects도 복원
+    const s = settings as unknown as WizardState;
     const merged: WizardState = {
       ...DEFAULT,
       era: settings.era ?? DEFAULT.era,
@@ -183,14 +185,15 @@ export function WizardProvider({ children }: { children: ReactNode }) {
       coverStyle: settings.coverStyle ?? DEFAULT.coverStyle,
       unit: settings.unit ?? DEFAULT.unit,
       paragraphLength: settings.paragraphLength,
-      // C0 full objects: DB에 저장되지 않으므로 빈 배열 (편집 시 AI 재생성 가능)
-      worldFactionsData: [],
-      worldRanksData: [],
-      worldRegions: [],
-      worldMapEdges: [],
+      // C0 full objects — DB에 저장된 값 우선, 없으면 빈 배열
+      worldFactionsData: s.worldFactionsData ?? [],
+      worldRanksData: s.worldRanksData ?? [],
+      worldRegions: s.worldRegions ?? [],
+      worldMapEdges: s.worldMapEdges ?? [],
       novelId: null,
       chapterContent: null,
       editingNovelId: novelId,
+      returnTo: returnTo ?? null,
     };
     setData(merged);
     saveEditingId(novelId);
@@ -198,7 +201,7 @@ export function WizardProvider({ children }: { children: ReactNode }) {
 
   const clearEditMode = useCallback(() => {
     clearEditingId();
-    merge({ editingNovelId: null });
+    merge({ editingNovelId: null, returnTo: null });
   }, [merge]);
 
   return (

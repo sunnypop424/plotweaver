@@ -6,6 +6,7 @@ AI 자동완성 제안 엔드포인트
 import json, math, os, re, logging
 from fastapi import APIRouter, Depends, Body, HTTPException
 from auth import get_current_user
+from db import get_db
 import anthropic
 from dotenv import load_dotenv
 
@@ -380,6 +381,130 @@ async def suggest_title(body: dict = Body(...), user=Depends(get_current_user)):
     msg = _ai().messages.create(
         model="claude-sonnet-4-6",
         max_tokens=300,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return _parse_json(msg.content[0].text)
+
+
+@router.post("/review")
+async def review_chapter(body: dict = Body(...), user=Depends(get_current_user)):
+    """회차 원고를 위저드 설정과 비교해 AI 검토 후 구조화된 피드백 반환."""
+    novel_id = body.get("novelId", "")
+    seq = int(body.get("seq", 1))
+    content = body.get("content", "").strip()
+
+    if not content:
+        raise HTTPException(status_code=400, detail="내용이 비어있어요")
+
+    # DB에서 작품 설정 및 이전 회차 가져오기
+    db = get_db()
+    novel_row = (
+        db.table("novels")
+        .select("title, settings")
+        .eq("id", novel_id)
+        .eq("author_id", str(user.id))
+        .single()
+        .execute()
+    )
+    if not novel_row.data:
+        raise HTTPException(status_code=404, detail="작품을 찾을 수 없습니다")
+
+    title = novel_row.data["title"]
+    settings = novel_row.data["settings"] or {}
+    era = settings.get("era", "")
+    genres = settings.get("genres", [])
+    world_rules = settings.get("worldRules", "")
+    conflict = settings.get("conflict", "")
+    goal = settings.get("goal", "")
+    characters = settings.get("characters", [])
+    relationships = settings.get("relationships", [])
+
+    # 등장인물 요약
+    char_lines = []
+    for c in characters[:8]:
+        name = c.get("name", "?")
+        role = c.get("role", "?")
+        personality = c.get("personality", "")
+        speech = c.get("mannerism", "")
+        line = f"  - {name}({role})"
+        if personality:
+            line += f": 성격={personality}"
+        if speech:
+            line += f", 말투·버릇={speech}"
+        char_lines.append(line)
+    char_str = "\n".join(char_lines) or "  미정"
+
+    # 관계도 요약
+    rel_lines = []
+    for r in relationships[:6]:
+        rel_lines.append(f"  - {r.get('fromChar', '?')} ↔ {r.get('toChar', '?')}: {r.get('relation', '')}")
+    rel_str = "\n".join(rel_lines) if rel_lines else "  없음"
+
+    # 이전 회차 마지막 500자 (연결성 확인)
+    prev_block = ""
+    if seq > 1:
+        prev = (
+            db.table("chapters")
+            .select("content")
+            .eq("novel_id", novel_id)
+            .eq("seq", seq - 1)
+            .single()
+            .execute()
+        )
+        if prev.data and prev.data.get("content"):
+            snippet = prev.data["content"][-500:]
+            prev_block = f"\n[{seq - 1}화 마지막 부분 — 연결성 확인]\n{snippet}\n"
+
+    prompt = f"""당신은 웹소설 검수·교정 전문가입니다. 아래 {seq}화 원고를 작품 설정과 대조해 꼼꼼히 검토하세요.
+
+[작품 설정]
+제목: {title}
+배경·시대: {era}
+장르: {', '.join(genres) if genres else '미정'}
+주인공 목표: {goal or '없음'}
+핵심 갈등: {conflict or '없음'}
+세계 규칙: {world_rules or '없음'}
+
+[등장인물]
+{char_str}
+
+[인물 관계]
+{rel_str}
+{prev_block}
+[{seq}화 원고 (검토 대상)]
+{content[:4000]}
+
+아래 5가지를 검토하고, 반드시 JSON만 반환하세요 (설명·마크다운 없이):
+
+① 시대·배경 고증 — 해당 시대·세계에 없는 단어·사물·개념·기술
+② 인물 일관성 — 설정한 성격·말투와 다른 행동이나 대사
+③ 문장 구조 — 어색한 표현, 과도한 반복, 읽기 불편한 문장
+④ 대사 자연성 — 부자연스러운 한국어 대화체, 어색한 호칭
+⑤ 흐름·연결성 — 갑작스러운 전환, 논리 비약, 이전 회차와 불연속
+
+{{
+  "ok": true,
+  "summary": "총평 한 줄 (30자 이내)",
+  "issues": [
+    {{
+      "type": "시대고증|인물일관성|문장구조|대사|흐름",
+      "severity": "error|warning|info",
+      "text": "구체적 문제 설명 (1~2문장)",
+      "quote": "원고에서 문제가 되는 구절을 한 문장 이내로 그대로 복사. 찾을 수 없으면 빈 문자열.",
+      "suggestion": "quote를 대체할 개선된 표현. quote와 동일한 위치에 바로 치환할 수 있도록 자연스럽게 작성. quote가 없으면 빈 문자열."
+    }}
+  ]
+}}
+
+규칙:
+- quote는 원고 원문을 그대로 복사해야 함 (요약·수정 금지)
+- suggestion은 quote 자리에 바로 들어가도 문맥이 자연스러워야 함
+- 문제 없으면 issues=[], ok=true
+- error 1개 이상이면 ok=false"""
+
+    msg = _ai().messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=2000,
         messages=[{"role": "user", "content": prompt}],
     )
     return _parse_json(msg.content[0].text)

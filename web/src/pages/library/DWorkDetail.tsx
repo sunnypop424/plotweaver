@@ -148,6 +148,7 @@ export default function DWorkDetail() {
         <button onClick={() => navigate("/library")} className="pw-btn-ghost h-[38px] flex-shrink-0 px-3 text-sm">← 작업실</button>
         <div className="min-w-0 truncate text-base font-bold">{title}</div>
         <div className="flex flex-shrink-0 items-center gap-2">
+          <button onClick={handleEditSettings} disabled={!settings} className="h-10 rounded border border-line2 bg-white px-3.5 text-[13px] font-bold text-ink2 transition hover:border-brand hover:bg-wash hover:text-brand disabled:opacity-40">설정 편집</button>
           {isWide && (
             <>
               <button onClick={() => navigate(`/works/${novelId}/cover`)} className="h-10 rounded border border-line2 bg-white px-3.5 text-[13px] font-bold text-ink2 transition hover:border-wash-2 hover:bg-wash hover:text-brand">표지 만들기</button>
@@ -223,15 +224,7 @@ export default function DWorkDetail() {
               className="flex w-full items-center justify-between px-[22px] py-4"
             >
               <span className="text-base font-bold text-ink">작품 설정</span>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={(e) => { e.stopPropagation(); handleEditSettings(); }}
-                  className="h-8 rounded border border-line2 bg-white px-3 text-[13px] font-bold text-ink2 transition hover:border-brand hover:text-brand"
-                >
-                  설정 편집
-                </button>
-                <span className="text-sm text-muted">{settingsOpen ? "▲" : "▼"}</span>
-              </div>
+              <span className="text-sm text-muted">{settingsOpen ? "▲" : "▼"}</span>
             </button>
 
             {settingsOpen && (
@@ -318,23 +311,24 @@ export default function DWorkDetail() {
               <span className="text-base font-bold">회차 목록</span>
               <span className="text-[13px] font-bold text-muted">{done}화</span>
             </div>
-            <button onClick={() => navigate(`/works/${novelId}/edit`)} className="inline-flex h-10 items-center gap-1.5 rounded border-none bg-brand px-4 text-sm font-bold text-white transition hover:bg-brand-hover">+ 다음 회차 생성</button>
+            <button onClick={() => navigate(`/works/${novelId}/edit`, { state: { title, chapters: chapters.map(c => ({ seq: c.seq, content: c.content })) } })} className="inline-flex h-10 items-center gap-1.5 rounded border-none bg-brand px-4 text-sm font-bold text-white transition hover:bg-brand-hover">+ 다음 회차 생성</button>
           </div>
 
           {chapters.length === 0 ? (
             <div className="px-6 py-12 text-center">
               <div className="text-[15px] font-bold text-ink2">아직 회차가 없어요</div>
               <div className="mt-1.5 text-[13px] text-muted">첫 회차를 생성하면 여기에 쌓여요.</div>
-              <button onClick={() => navigate(`/works/${novelId}/edit`)} className="mt-[18px] h-[46px] rounded border-none bg-brand px-[22px] text-[15px] font-bold text-white">✦ 첫 회차 생성하기</button>
+              <button onClick={() => navigate(`/works/${novelId}/edit`, { state: { title, chapters: [] } })} className="mt-[18px] h-[46px] rounded border-none bg-brand px-[22px] text-[15px] font-bold text-white">✦ 첫 회차 생성하기</button>
             </div>
           ) : (
             <div className="flex flex-col">
               {chapters.map((c) => {
                 const wordCount = Math.round(c.content.replace(/\s+/g, "").length / 2);
+                const goEdit = () => navigate(`/works/${novelId}/edit`, { state: { title, chapters: chapters.map(ch => ({ seq: ch.seq, content: ch.content })) } });
                 return (
                   <div key={c.seq} className="flex items-center gap-3.5 border-b border-[#f4f4f4] px-2 py-3.5 last:border-b-0">
                     <span className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-lg bg-wash text-sm font-bold text-brand">{c.seq}</span>
-                    <button onClick={() => navigate(`/works/${novelId}/edit`)} className="min-w-0 flex-1 border-none bg-transparent p-0 text-left">
+                    <button onClick={goEdit} className="min-w-0 flex-1 border-none bg-transparent p-0 text-left">
                       <div className="truncate text-sm font-bold text-ink">{c.seq}화</div>
                       <div className="mt-1 flex flex-wrap items-center gap-2">
                         <span className="text-xs text-muted">{wordCount.toLocaleString("ko-KR")}자</span>
@@ -344,7 +338,7 @@ export default function DWorkDetail() {
                     </button>
                     <div className="flex flex-shrink-0 items-center gap-1">
                       <ActBtn wide onClick={() => navigate(`/read/${novelId}`, { state: { seq: c.seq } })}>읽기</ActBtn>
-                      <ActBtn onClick={() => navigate(`/works/${novelId}/edit`)}>✎</ActBtn>
+                      <ActBtn onClick={goEdit}>✎</ActBtn>
                       <ActBtn onClick={() => showToast(`${c.seq}화 재생성은 에디터에서 할 수 있어요`)}>↻</ActBtn>
                       <ActBtn danger onClick={() => showToast("회차 삭제는 준비 중이에요")}>✕</ActBtn>
                     </div>

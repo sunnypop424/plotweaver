@@ -4,13 +4,20 @@ import { useToast } from "@/components/Toast";
 import { useViewport } from "@/lib/useViewport";
 import { useWizard } from "@/providers/WizardProvider";
 
-/** 창작 위저드 5스텝 공통 셸 — 상단바 + 5스텝 인디케이터. current는 라우트 handle로 주입. */
+const STEP_PATHS = [
+  "/create/world",
+  "/create",
+  "/create/relations",
+  "/create/narrative",
+  "/create/output",
+];
+
 const PREV: Record<number, string> = {
   1: "/library",
   2: "/create/world",
-  3: "/create",           // 관계도(3) 이전 = 인물(2)
-  4: "/create/relations", // 서사(4) 이전 = 관계도(3)
-  5: "/create/narrative", // 출력(5) 이전 = 서사(4)
+  3: "/create",
+  4: "/create/relations",
+  5: "/create/narrative",
 };
 
 export default function WizardLayout() {
@@ -25,10 +32,17 @@ export default function WizardLayout() {
 
   const handleBack = () => {
     if (isEditMode && step === 1) {
-      navigate(`/works/${wizData.editingNovelId}`);
+      // 편집 진입 경로로 복귀 (에디터 or 작품 상세)
+      navigate(wizData.returnTo ?? `/works/${wizData.editingNovelId}`);
     } else {
       navigate(PREV[step] ?? "/library");
     }
+  };
+
+  const handleStepClick = (clickedStep: number) => {
+    // 편집 모드: 모든 스텝 이동 가능 / 생성 모드: 현재 이하만
+    if (!isEditMode && clickedStep > step) return;
+    navigate(STEP_PATHS[clickedStep - 1]);
   };
 
   return (
@@ -37,7 +51,9 @@ export default function WizardLayout() {
         current={step}
         isMobile={isMobile}
         isEditMode={isEditMode}
+        maxClickableStep={isEditMode ? 5 : step}
         onBack={handleBack}
+        onStepClick={handleStepClick}
         onSaveDraft={() => showToast("임시저장됨")}
       />
       <Outlet />

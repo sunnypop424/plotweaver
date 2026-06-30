@@ -5,16 +5,17 @@ import type { ReactNode } from "react";
 const STEPS = ["세계관", "기본설정", "관계도", "서사설정", "출력설정"];
 
 type Props = {
-  /** 현재 단계 (1~5) */
   current: number;
   isMobile: boolean;
   maxWidth?: number;
   isEditMode?: boolean;
+  maxClickableStep?: number;
   onBack: () => void;
   onSaveDraft: () => void;
+  onStepClick?: (step: number) => void;
 };
 
-export function WizardChrome({ current, isMobile, maxWidth = 1120, isEditMode = false, onBack, onSaveDraft }: Props) {
+export function WizardChrome({ current, isMobile, maxWidth = 1120, isEditMode = false, maxClickableStep, onBack, onSaveDraft, onStepClick }: Props) {
   return (
     <>
       {/* TOP BAR */}
@@ -45,9 +46,9 @@ export function WizardChrome({ current, isMobile, maxWidth = 1120, isEditMode = 
       <div className="border-b border-hairline bg-white px-5 py-[18px]">
         <div className="mx-auto" style={{ maxWidth }}>
           {isMobile ? (
-            <MobileStepper current={current} />
+            <MobileStepper current={current} onStepClick={onStepClick} maxClickableStep={maxClickableStep} />
           ) : (
-            <DesktopStepper current={current} />
+            <DesktopStepper current={current} onStepClick={onStepClick} maxClickableStep={maxClickableStep} />
           )}
         </div>
       </div>
@@ -55,26 +56,29 @@ export function WizardChrome({ current, isMobile, maxWidth = 1120, isEditMode = 
   );
 }
 
-function DesktopStepper({ current }: { current: number }) {
+function DesktopStepper({ current, onStepClick, maxClickableStep }: { current: number; onStepClick?: (step: number) => void; maxClickableStep?: number }) {
   return (
     <div className="flex w-full items-center">
       {STEPS.map((label, i) => {
         const n = i + 1;
         const done = n < current;
         const active = n === current;
+        const clickable = !!onStepClick && n <= (maxClickableStep ?? current) && !active;
         return (
           <Segment key={label} first={i === 0} doneLine={n <= current}>
-            <Bubble done={done} active={active}>
+            <Bubble done={done} active={active} clickable={clickable} onClick={clickable ? () => onStepClick!(n) : undefined}>
               {done ? "✓" : n}
             </Bubble>
-            <span
+            <button
+              onClick={clickable ? () => onStepClick!(n) : undefined}
               className={
-                "text-[15px] font-bold " +
-                (done ? "text-brand" : active ? "text-ink" : "text-muted")
+                "text-[15px] font-bold transition-colors " +
+                (done ? "text-brand" : active ? "text-ink" : "text-muted") +
+                (clickable ? " cursor-pointer hover:text-brand" : " cursor-default")
               }
             >
               {label}
-            </span>
+            </button>
           </Segment>
         );
       })}
@@ -93,20 +97,23 @@ function Segment({ first, doneLine, children }: { first: boolean; doneLine: bool
   );
 }
 
-function Bubble({ done, active, children }: { done: boolean; active: boolean; children: ReactNode }) {
+function Bubble({ done, active, clickable, onClick, children }: { done: boolean; active: boolean; clickable?: boolean; onClick?: () => void; children: ReactNode }) {
   const cls = done
     ? "bg-wash text-brand"
     : active
     ? "bg-brand text-white"
     : "bg-white text-muted border border-line2";
   return (
-    <div className={"flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold " + cls}>
+    <div
+      onClick={onClick}
+      className={"flex h-8 w-8 items-center justify-center rounded-full text-sm font-bold transition-opacity " + cls + (clickable ? " cursor-pointer hover:opacity-75" : "")}
+    >
       {children}
     </div>
   );
 }
 
-function MobileStepper({ current }: { current: number }) {
+function MobileStepper({ current, onStepClick, maxClickableStep }: { current: number; onStepClick?: (step: number) => void; maxClickableStep?: number }) {
   return (
     <div>
       <div className="flex items-center justify-between">
@@ -119,12 +126,17 @@ function MobileStepper({ current }: { current: number }) {
         <span className="text-[13px] font-bold text-muted">{current} / {STEPS.length}</span>
       </div>
       <div className="mt-2.5 flex gap-1.5">
-        {STEPS.map((_, i) => (
-          <div
-            key={i}
-            className={"h-1 flex-1 rounded-full " + (i + 1 <= current ? "bg-brand" : "bg-hairline")}
-          />
-        ))}
+        {STEPS.map((_, i) => {
+          const n = i + 1;
+          const clickable = !!onStepClick && n <= (maxClickableStep ?? current) && n !== current;
+          return (
+            <div
+              key={i}
+              onClick={clickable ? () => onStepClick!(n) : undefined}
+              className={"h-1 flex-1 rounded-full transition-opacity " + (n <= current ? "bg-brand" : "bg-hairline") + (clickable ? " cursor-pointer hover:opacity-70" : "")}
+            />
+          );
+        })}
       </div>
     </div>
   );

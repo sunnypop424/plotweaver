@@ -320,13 +320,36 @@ def _build_char_prompt(settings: dict, include_char: bool, featured_char_names: 
     if not protagonist:
         return ""
 
+    TEEN_KEYWORDS = ("중학생", "고등학생", "학생", "소년", "소녀", "10대", "십대", "청소년")
+    COLLEGE_KEYWORDS = ("대학생", "대학원생")
+
+    def _age_hint(c: dict) -> str:
+        """status·appearance에서 나이 카테고리 감지: 'teen' | 'college' | 'adult'"""
+        combined = (c.get("status", "") + " " + c.get("appearance", "")).lower()
+        if any(k in combined for k in TEEN_KEYWORDS):
+            return "teen"
+        if any(k in combined for k in COLLEGE_KEYWORDS):
+            return "college"
+        return "adult"
+
     def _desc(c: dict) -> str:
         parts = []
         gender = c.get("gender", "")
+        age = _age_hint(c)
         if gender in ("여", "여성", "여자"):
-            parts.append("beautiful young woman")
+            if age == "teen":
+                parts.append("teenage girl")
+            elif age == "college":
+                parts.append("college-age young woman")
+            else:
+                parts.append("beautiful young woman")
         elif gender in ("남", "남성", "남자"):
-            parts.append("handsome young man")
+            if age == "teen":
+                parts.append("teenage boy")
+            elif age == "college":
+                parts.append("college-age young man")
+            else:
+                parts.append("handsome young man")
         elif gender:
             parts.append(gender)
         if c.get("appearance"):
@@ -361,10 +384,19 @@ def _build_char_prompt(settings: dict, include_char: bool, featured_char_names: 
     else:
         featured_chars = [char_map[n] for n in featured_char_names if n in char_map]
 
+    # 십대 캐릭터 여부 감지 → 나이 강조 문구 추가
+    all_chars = [protagonist] + featured_chars
+    has_teen = any(_age_hint(c) == "teen" for c in all_chars)
+    teen_note = (
+        "CRITICAL: All characters must appear as teenagers with youthful, young faces — NOT as adults. "
+        "Draw them as high school students: slim youthful faces, clear skin, teen proportions. "
+    ) if has_teen else ""
+
     if len(featured_chars) == 0:
         return (
             f"Feature the protagonist alone: {prot_desc}. "
             "Protagonist is centered prominently with a dramatic, expressive pose that captures their personality. "
+            + teen_note
         )
     elif len(featured_chars) == 1:
         key_desc = _desc(featured_chars[0])
@@ -372,6 +404,7 @@ def _build_char_prompt(settings: dict, include_char: bool, featured_char_names: 
             f"Characters in the scene — Protagonist: {prot_desc}, placed prominently in the foreground with a dramatic pose. "
             f"Key figure alongside protagonist: {key_desc}. "
             "Both characters must be clearly recognizable with expressive, dynamic poses that reflect their personalities. "
+            + teen_note
         )
     else:
         others = "; ".join(_desc(c) for c in featured_chars)
@@ -379,7 +412,36 @@ def _build_char_prompt(settings: dict, include_char: bool, featured_char_names: 
             f"Ensemble cast — Protagonist: {prot_desc} (centered, most prominent in composition). "
             f"Supporting characters alongside protagonist: {others}. "
             "All characters arranged in a dramatic group composition, each with expressive poses reflecting their personality. "
+            + teen_note
         )
+
+
+def _describe_ref_images(b64_list: list[str]) -> str:
+    """참고 이미지 → 시각적 요소 설명 (GPT-4o Vision 사용)."""
+    import openai as _openai
+    if not b64_list:
+        return ""
+    content: list[dict] = []
+    for b64 in b64_list[:3]:
+        # data URL이면 그대로, 아니면 jpeg base64로 감싸기
+        data_url = b64 if b64.startswith("data:") else f"data:image/jpeg;base64,{b64}"
+        content.append({"type": "image_url", "image_url": {"url": data_url, "detail": "low"}})
+    content.append({
+        "type": "text",
+        "text": (
+            "Describe ONLY the visual design elements visible in these reference images that should appear "
+            "in a book cover illustration. Focus on: clothing style and details, color palette, "
+            "design patterns, textures, accessories, and overall visual atmosphere. "
+            "Be concise (2–3 sentences). Do NOT describe people's faces or identities."
+        ),
+    })
+    client = _openai.OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+    resp = client.chat.completions.create(
+        model="gpt-4o-mini",
+        max_tokens=250,
+        messages=[{"role": "user", "content": content}],
+    )
+    return resp.choices[0].message.content.strip()
 
 
 @router.post("/novels/{novel_id}/cover")
@@ -507,6 +569,48 @@ def generate_cover(novel_id: str, body: dict = Body(default={}), user=Depends(ge
     # ── 인물 묘사 블록 ─────────────────────────────────────────────────────
     char_block = _build_char_prompt(settings, include_char, featured_char_names)
 
+    # ── 세계관·서사 힌트 (시각적으로 반영 가능한 요소만) ──────────────────
+    world_rules = settings.get("worldRules", "").strip()
+    goal = settings.get("goal", "").strip()
+    conflict = settings.get("conflict", "").strip()
+    relationships = settings.get("relationships", [])
+
+    # 인물 관계에서 감정 톤 추출 (연인/라이벌/적 등)
+    rel_tones = []
+    protagonist_name = next(
+        (c.get("name", "") for c in settings.get("characters", []) if c.get("role") == "protagonist"), ""
+    )
+    REL_MOOD = {
+        "연인": "romantic tension between characters",
+        "사랑": "romantic atmosphere",
+        "적": "fierce rivalry and tension",
+        "라이벌": "competitive confrontation energy",
+        "친구": "warm friendly bond",
+        "스승": "mentor-student dynamic",
+        "부하": "leader-follower hierarchy",
+        "원수": "deep-seated animosity",
+    }
+    for r in relationships[:5]:
+        involved = {r.get("fromChar", ""), r.get("toChar", "")}
+        if protagonist_name in involved:
+            rel_label = r.get("relation", "")
+            for key, mood in REL_MOOD.items():
+                if key in rel_label:
+                    rel_tones.append(mood)
+                    break
+
+    # 세계관/갈등에서 시각 요소 힌트
+    narrative_hint_parts = []
+    if conflict:
+        narrative_hint_parts.append(f"thematic tension: {conflict[:60]}")
+    if goal:
+        narrative_hint_parts.append(f"protagonist's driving force: {goal[:60]}")
+    if rel_tones:
+        narrative_hint_parts.append(", ".join(dict.fromkeys(rel_tones)))  # 중복 제거
+    if world_rules:
+        narrative_hint_parts.append(f"world feel: {world_rules[:80]}")
+    narrative_hint = ("Story essence — " + "; ".join(narrative_hint_parts) + ".") if narrative_hint_parts else ""
+
     # ── 대사·UI 텍스트 완전 금지 ──────────────────────────────────────────
     no_dialogue = (
         "STRICT RULE: Absolutely NO speech bubbles, NO dialogue text, NO captions, "
@@ -521,6 +625,8 @@ def generate_cover(novel_id: str, body: dict = Body(default={}), user=Depends(ge
         f"Atmosphere: {genre_mood}.",
         f"Color palette: {genre_palette}, {tone_desc}.",
     ]
+    if narrative_hint:
+        prompt_parts.append(narrative_hint)
     if char_block:
         prompt_parts.append(char_block)
     if title_space:
@@ -530,6 +636,19 @@ def generate_cover(novel_id: str, body: dict = Body(default={}), user=Depends(ge
         no_dialogue,
         text_instruction,
     ]
+
+    # ── 참고 이미지 분석 ──────────────────────────────────────────────────
+    ref_images = body.get("refImages", [])
+    if ref_images and isinstance(ref_images, list):
+        ref_desc = _describe_ref_images([r for r in ref_images if isinstance(r, str)])
+        if ref_desc:
+            prompt_parts.append(f"Reference design elements from uploaded images: {ref_desc}")
+
+    # ── 추가 프롬프트 (구도, 자세 등 사용자 직접 입력) ─────────────────────
+    extra_prompt = body.get("extraPrompt", "").strip()
+    if extra_prompt:
+        prompt_parts.append(f"Additional composition/pose instructions: {extra_prompt}")
+
     prompt = " ".join(prompt_parts)
 
     count = max(1, min(int(body.get("count", 4)), 4))

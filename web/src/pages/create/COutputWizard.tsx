@@ -116,6 +116,15 @@ export default function COutputWizard() {
     setKeywordText("");
   };
 
+  // 필수항목 경고 (저장은 가능하되 사용자에게 알림)
+  const missingWarnings = [
+    !wizData.era && "배경·시대",
+    !wizData.genres.length && "장르",
+    !wizData.characters.length && "등장인물",
+    !wizData.goal && "주인공 목표",
+    !wizData.conflict && "핵심 갈등",
+  ].filter((v): v is string => !!v);
+
   const protagonist = wizData.characters.find((c) => c.role === "protagonist");
   const charSummary = wizData.characters.length === 0
     ? "미입력"
@@ -331,6 +340,30 @@ export default function COutputWizard() {
               </div>
             )}
           </div>
+
+          {/* 필수항목 경고 */}
+          {missingWarnings.length > 0 && (
+            <div className="mb-4 rounded-lg border border-[#ffe69c] bg-[#fffdf0] px-4 py-3" style={{ animation: "pw-fill .2s ease" }}>
+              <div className="mb-1 text-[13px] font-bold text-[#856404]">⚠ 일부 설정이 비어있어요</div>
+              <div className="text-[12px] leading-relaxed text-[#856404]">
+                <span className="font-bold">{missingWarnings.join(", ")}</span>이(가) 입력되지 않았어요.<br />
+                설정 없이 저장하면 AI가 임의로 생성하거나 품질이 낮을 수 있어요.
+              </div>
+              {editingNovelId && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {missingWarnings.includes("배경·시대") || missingWarnings.includes("장르") ? (
+                    <button onClick={() => navigate("/create/world")} className="rounded-full border border-[#ffe69c] bg-white px-2.5 py-1 text-[11px] font-bold text-[#856404] hover:bg-[#fff3cd]">① 세계관 설정 →</button>
+                  ) : null}
+                  {missingWarnings.includes("등장인물") ? (
+                    <button onClick={() => navigate("/create")} className="rounded-full border border-[#ffe69c] bg-white px-2.5 py-1 text-[11px] font-bold text-[#856404] hover:bg-[#fff3cd]">② 인물 설정 →</button>
+                  ) : null}
+                  {(missingWarnings.includes("주인공 목표") || missingWarnings.includes("핵심 갈등")) ? (
+                    <button onClick={() => navigate("/create/narrative")} className="rounded-full border border-[#ffe69c] bg-white px-2.5 py-1 text-[11px] font-bold text-[#856404] hover:bg-[#fff3cd]">④ 서사 설정 →</button>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* DESKTOP nav */}
           {!isMobile && (

@@ -136,7 +136,7 @@ export function generateChapter(novelId: string, seq = 1) {
   );
 }
 
-export function generateCover(novelId: string, opts?: { includeTitle?: boolean; includeAuthor?: boolean; includeChar?: boolean; featuredCharNames?: string[]; authorName?: string; count?: number }) {
+export function generateCover(novelId: string, opts?: { includeTitle?: boolean; includeAuthor?: boolean; includeChar?: boolean; featuredCharNames?: string[]; authorName?: string; count?: number; extraPrompt?: string; refImages?: string[] }) {
   return request<{ cover_url: string; cover_urls: string[] }>("POST", `/api/novels/${novelId}/cover`, { count: 4, ...opts });
 }
 
@@ -199,4 +199,22 @@ export function updateChapter(novelId: string, seq: number, content: string) {
 
 export function suggestTitle(params: { era: string; genres: string[]; goal: string; conflict: string; characters: NovelSettings["characters"]; pov: string; ending: string }) {
   return request<{ titles: string[] }>("POST", "/api/suggest/title", params);
+}
+
+export interface ReviewIssue {
+  type: string;
+  severity: "error" | "warning" | "info";
+  text: string;
+  quote: string;
+  suggestion?: string;
+}
+
+export interface ReviewResult {
+  ok: boolean;
+  summary: string;
+  issues: ReviewIssue[];
+}
+
+export function reviewChapter(novelId: string, seq: number, content: string) {
+  return request<ReviewResult>("POST", "/api/suggest/review", { novelId, seq, content });
 }

@@ -1,57 +1,90 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useToast } from "@/components/Toast";
 import { useViewport } from "@/lib/useViewport";
 import { useWizard } from "@/providers/WizardProvider";
-import { generateChapter, getNovel, listChapters, updateChapter } from "@/lib/api";
+import { generateChapter, getNovel, listChapters, updateChapter, reviewChapter, type ReviewResult, type ReviewIssue } from "@/lib/api";
 
 type Chapter = { id: number; num: number; title: string; body: string };
 type Mode = "read" | "edit";
+type NavState = { title?: string; chapters?: { seq: number; content: string }[] } | null;
 
 export default function C4EditorViewer() {
   const { isMobile, isDesktop } = useViewport();
   const { showToast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
   const { id: novelId } = useParams<{ id: string }>();
-  const { data: wizData, reset } = useWizard();
+  const { data: wizData, reset, loadFromNovel } = useWizard();
 
+  const navState = (location.state as NavState) ?? null;
   const chapterBody = wizData.chapterContent ?? "";
-  const [localTitle, setLocalTitle] = useState("");
-  const novelTitle = wizData.title || localTitle || "무제";
-  const cid = useRef(1);
 
-  const [chapters, setChapters] = useState<Chapter[]>([
-    { id: 1, num: 1, title: "1화", body: chapterBody || "" },
-  ]);
+  // 제목: wizData > 네비게이션 state > API 로드
+  const [localTitle, setLocalTitle] = useState(navState?.title ?? "");
+  const novelTitle = wizData.title || localTitle || "...";
 
-  // DB에서 전체 회차 및 제목 로드
+  // 회차: 네비게이션 state에 데이터가 있으면 즉시 렌더, 없으면 API 로드
+  const initChapters = (): Chapter[] => {
+    if (navState?.chapters?.length) {
+      return [...navState.chapters]
+        .sort((a, b) => a.seq - b.seq)
+        .map((c) => ({
+          id: c.seq, num: c.seq, title: `${c.seq}화`,
+          body: c.seq === 1 && chapterBody ? chapterBody : c.content,
+        }));
+    }
+    return [{ id: 1, num: 1, title: "1화", body: chapterBody || "" }];
+  };
+  const [chapters, setChapters] = useState<Chapter[]>(initChapters);
+  const [chaptersReady, setChaptersReady] = useState(
+    !!(navState?.chapters?.length || chapterBody)
+  );
+
+  const cid = useRef(
+    navState?.chapters?.length
+      ? Math.max(...navState.chapters.map((c) => c.seq))
+      : 1
+  );
+
   useEffect(() => {
     if (!novelId) return;
-    if (!wizData.title) {
-      getNovel(novelId).then(n => setLocalTitle(n.title)).catch(() => {});
+    const needTitle = !wizData.title && !navState?.title;
+    const needChapters = !navState?.chapters?.length;
+
+    if (needTitle) {
+      getNovel(novelId).then((n) => setLocalTitle(n.title)).catch(() => {});
     }
-    listChapters(novelId)
-      .then((chs) => {
-        if (chs.length === 0) return;
-        const sorted = chs.sort((a, b) => a.seq - b.seq);
-        setChapters(sorted.map((c) => ({
-          id: c.seq,
-          num: c.seq,
-          title: `${c.seq}화`,
-          // 1화는 wizData 메모리(방금 생성한 경우) 우선, 없으면 DB 내용
-          body: c.seq === 1 && chapterBody ? chapterBody : c.content,
-        })));
-        cid.current = sorted[sorted.length - 1].seq;
-      })
-      .catch(() => {});
+    if (needChapters) {
+      listChapters(novelId)
+        .then((chs) => {
+          if (chs.length === 0) { setChaptersReady(true); return; }
+          const sorted = chs.sort((a, b) => a.seq - b.seq);
+          setChapters(sorted.map((c) => ({
+            id: c.seq, num: c.seq, title: `${c.seq}화`,
+            body: c.seq === 1 && chapterBody ? chapterBody : c.content,
+          })));
+          cid.current = sorted[sorted.length - 1].seq;
+        })
+        .catch(() => {})
+        .finally(() => setChaptersReady(true));
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const [currentId, setCurrentId] = useState(1);
+
+  const [currentId, setCurrentId] = useState(
+    navState?.chapters?.length
+      ? Math.max(...navState.chapters.map((c) => c.seq))
+      : 1
+  );
   const [mode, setMode] = useState<Mode>("read");
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [regenerating, setRegenerating] = useState(false);
   const [generatingNext, setGeneratingNext] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
+  const [reviewResult, setReviewResult] = useState<ReviewResult | null>(null);
+  const [reviewRound, setReviewRound] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [contribution, setContribution] = useState(18);
 
@@ -82,6 +115,44 @@ export default function C4EditorViewer() {
     setChapters((cs) => cs.map((c) => (c.id === currentId ? { ...c, body: val } : c)));
     setContribution((v) => Math.min(100, v + 2));
     setSavedAt(null);
+  };
+
+  // isReReview=true 이면 이슈 없을 때 자동 저장 후 모달 닫기
+  const runReview = async (isReReview = false) => {
+    if (reviewing || !novelId) return;
+    setReviewing(true);
+    try {
+      const result = await reviewChapter(novelId, cur.num, cur.body);
+      setReviewRound(r => r + 1);
+      const critical = result.issues.filter(i => i.severity !== "info");
+      if (isReReview && critical.length === 0) {
+        await saveCurrentChapter();
+        setReviewResult(null);
+        setReviewRound(0);
+        showToast("이슈가 없어 자동 저장됐어요");
+      } else {
+        setReviewResult(result);
+      }
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "검토 실패");
+    } finally {
+      setReviewing(false);
+    }
+  };
+
+  // 개별 이슈의 개선안을 원고에 반영하고 목록에서 제거
+  const applyFix = (issue: ReviewIssue) => {
+    if (!issue?.quote || !issue?.suggestion) return;
+    const curBody = chapters.find(c => c.id === currentId)?.body ?? "";
+    const newBody = curBody.replace(issue.quote, issue.suggestion);
+    if (newBody === curBody) {
+      showToast("원문 구절을 찾지 못했어요. 직접 수정해 주세요.");
+      return;
+    }
+    setChapters(cs => cs.map(c => c.id === currentId ? { ...c, body: newBody } : c));
+    setReviewResult(prev =>
+      prev ? { ...prev, issues: prev.issues.filter(i => i !== issue) } : null
+    );
   };
 
   const regenerate = async () => {
@@ -160,12 +231,27 @@ export default function C4EditorViewer() {
           {saving && <span className="hidden text-xs text-muted sm:block">저장 중...</span>}
           {savedAt && !saving && <span className="hidden text-xs font-bold text-[#2f8f5b] sm:block">✓ 저장됨</span>}
         </div>
-        {!isMobile && (
-          <div className="flex flex-shrink-0 gap-2">
-            <button onClick={() => navigate(`/works/${novelId}/cover`)} className="pw-btn-slight h-10 px-3.5 text-sm">표지 만들기</button>
-            <button onClick={() => navigate("/seller/register", { state: { novelId, title: novelTitle } })} className="pw-btn-primary h-10 px-4 text-sm">판매등록</button>
-          </div>
-        )}
+        <div className="flex flex-shrink-0 gap-2">
+          <button
+            onClick={async () => {
+              if (!novelId) return;
+              try {
+                const novel = await getNovel(novelId);
+                loadFromNovel(novelId, novel.settings, `/works/${novelId}/edit`);
+                navigate("/create/world");
+              } catch {
+                navigate(`/works/${novelId}`);
+              }
+            }}
+            className="pw-btn-slight h-10 px-3.5 text-sm"
+          >설정 편집</button>
+          {!isMobile && (
+            <>
+              <button onClick={() => navigate(`/works/${novelId}/cover`)} className="pw-btn-slight h-10 px-3.5 text-sm">표지 만들기</button>
+              <button onClick={() => navigate("/seller/register", { state: { novelId, title: novelTitle } })} className="pw-btn-primary h-10 px-4 text-sm">판매등록</button>
+            </>
+          )}
+        </div>
       </div>
 
       {/* MAIN */}
@@ -209,7 +295,7 @@ export default function C4EditorViewer() {
             </div>
 
             {/* body */}
-            {regenerating ? (
+            {regenerating || !chaptersReady ? (
               <div className="flex flex-col gap-3.5 py-1.5">
                 {[96, 100, 88, 70, 93, 80].map((w, i) => (
                   <div key={i} className="pw-skel" style={{ width: `${w}%`, marginBottom: i === 3 ? 10 : 0 }} />
@@ -237,6 +323,9 @@ export default function C4EditorViewer() {
               <div className="flex flex-wrap gap-2">
                 <button onClick={partialEdit} className="inline-flex h-11 items-center gap-1.5 rounded border border-line2 bg-white px-4 text-sm font-bold text-ink2 transition hover:border-brand hover:bg-canvas hover:text-brand">편집 모드</button>
                 <button onClick={regenerate} className="inline-flex h-11 items-center gap-1.5 rounded border border-line2 bg-white px-4 text-sm font-bold text-ink2 transition hover:border-brand hover:bg-canvas hover:text-brand">재생성</button>
+                <button onClick={() => runReview()} disabled={reviewing} className={"inline-flex h-11 items-center gap-1.5 rounded border px-4 text-sm font-bold transition " + (reviewing ? "border-brand/30 bg-wash text-brand/50 cursor-default" : "border-brand/40 bg-white text-brand hover:bg-wash")}>
+                  {reviewing ? <><span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-brand/30 border-t-brand" /> 검토 중...</> : "✦ AI 검토 후 저장"}
+                </button>
               </div>
               {!isMobile &&
                 (generatingNext ? (
@@ -269,6 +358,136 @@ export default function C4EditorViewer() {
             <div className="mt-5 h-1.5 w-full overflow-hidden rounded-full bg-hairline">
               <div className="h-full w-2/5 rounded-full bg-brand" style={{ animation: "pw-progress 1.8s ease-in-out infinite" }} />
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI 검토 모달 */}
+      {(reviewResult || reviewing) && (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/50 sm:items-center" style={{ animation: "pw-fade .2s ease" }}>
+          <div className="flex w-full max-w-[540px] flex-col rounded-t-2xl bg-white sm:max-h-[90vh] sm:rounded-2xl sm:shadow-xl" style={{ animation: "pw-sheet .25s ease" }}>
+
+            {/* 헤더 */}
+            <div className="flex-shrink-0 border-b border-hairline px-6 py-5">
+              <div className="flex items-center justify-between">
+                <div className="text-[17px] font-bold text-ink">
+                  AI 검토 결과
+                  {reviewRound > 1 && <span className="ml-2 text-[13px] font-normal text-muted">{reviewRound}라운드</span>}
+                </div>
+                {reviewing ? (
+                  <span className="flex items-center gap-1.5 text-[13px] font-bold text-brand">
+                    <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-brand/30 border-t-brand" />
+                    검토 중...
+                  </span>
+                ) : reviewResult ? (
+                  <span className={"rounded-full px-3 py-1 text-[12px] font-bold " + (reviewResult.issues.filter(i => i.severity !== "info").length === 0 ? "bg-[#e8f5ee] text-[#2f8f5b]" : "bg-[#fff0f0] text-[#c0504e]")}>
+                    {reviewResult.issues.filter(i => i.severity !== "info").length === 0 ? "✓ 이상 없음" : `⚠ ${reviewResult.issues.filter(i => i.severity !== "info").length}건 수정 권장`}
+                  </span>
+                ) : null}
+              </div>
+              {reviewResult && <div className="mt-1.5 text-[13px] text-muted">{reviewResult.summary}</div>}
+            </div>
+
+            {/* 이슈 목록 */}
+            <div className="flex-1 overflow-y-auto px-6 py-4">
+              {reviewing && !reviewResult && (
+                <div className="flex flex-col gap-3 py-2">
+                  {[85, 100, 70, 90].map((w, i) => (
+                    <div key={i} className="pw-skel" style={{ width: `${w}%`, height: 20 }} />
+                  ))}
+                </div>
+              )}
+
+              {reviewResult && reviewResult.issues.length === 0 && (
+                <div className="py-8 text-center">
+                  <div className="mb-1.5 text-4xl">✓</div>
+                  <div className="text-[15px] font-bold text-[#2f8f5b]">검토 이슈가 없어요!</div>
+                  <div className="mt-1 text-[13px] text-muted">저장을 진행해 주세요.</div>
+                </div>
+              )}
+
+              {reviewResult && reviewResult.issues.length > 0 && (
+                <div className="flex flex-col gap-3">
+                  {reviewResult.issues.map((issue, i) => {
+                    const sev = issue.severity;
+                    const borderBg = sev === "error"
+                      ? "border-[#f8d7d7] bg-[#fff8f8]"
+                      : sev === "warning"
+                      ? "border-[#fff3cd] bg-[#fffdf0]"
+                      : "border-hairline bg-canvas";
+                    const icon = sev === "error" ? "🔴" : sev === "warning" ? "🟡" : "🔵";
+                    const canFix = !!(issue.quote && issue.suggestion);
+                    return (
+                      <div key={i} className={"rounded-xl border p-4 " + borderBg}>
+                        <div className="mb-2 flex items-center gap-1.5">
+                          <span>{icon}</span>
+                          <span className="text-[12px] font-bold text-ink2 uppercase tracking-wide">{issue.type}</span>
+                        </div>
+                        <div className="mb-3 text-[13px] leading-relaxed text-ink">{issue.text}</div>
+
+                        {issue.quote && (
+                          <div className="mb-2">
+                            <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-muted">원문</div>
+                            <div className="rounded-lg bg-[#f5f5f5] px-3 py-2.5 font-mono text-[12px] leading-relaxed text-[#555]">
+                              {issue.quote}
+                            </div>
+                          </div>
+                        )}
+
+                        {issue.suggestion && (
+                          <div className="mb-3">
+                            <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-[#2f8f5b]">개선안</div>
+                            <div className="rounded-lg border border-[#c3e8d0] bg-[#f0faf4] px-3 py-2.5 font-mono text-[12px] leading-relaxed text-[#1f6b44]">
+                              {issue.suggestion}
+                            </div>
+                          </div>
+                        )}
+
+                        {canFix && (
+                          <button
+                            onClick={() => applyFix(issue)}
+                            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-[#2f8f5b] px-4 text-[13px] font-bold text-white transition hover:bg-[#267a4f]"
+                          >
+                            개선하기 →
+                          </button>
+                        )}
+                        {!canFix && sev !== "info" && (
+                          <span className="text-[12px] font-bold text-muted">직접 수정이 필요해요</span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* 푸터 버튼 — 저장은 항상 활성 */}
+            <div className="flex-shrink-0 border-t border-hairline px-6 py-4">
+              <div className="flex gap-2.5">
+                <button
+                  onClick={() => { setReviewResult(null); setReviewRound(0); }}
+                  className="h-11 flex-1 rounded border border-line2 bg-white text-sm font-bold text-ink2 transition hover:border-brand hover:text-brand"
+                >
+                  계속 편집
+                </button>
+                {!reviewing && reviewResult && reviewResult.issues.filter(i => i.severity !== "info").length > 0 && (
+                  <button
+                    onClick={() => runReview(true)}
+                    className="h-11 flex-1 rounded border border-brand/40 bg-white text-sm font-bold text-brand transition hover:bg-wash"
+                  >
+                    재검토
+                  </button>
+                )}
+                <button
+                  disabled={saving}
+                  onClick={async () => { await saveCurrentChapter(); setReviewResult(null); setReviewRound(0); showToast("저장됐어요"); }}
+                  className="h-11 flex-[2] rounded bg-brand text-sm font-bold text-white transition hover:bg-brand-hover disabled:opacity-60"
+                >
+                  {saving ? "저장 중..." : "저장하기"}
+                </button>
+              </div>
+            </div>
+
           </div>
         </div>
       )}

@@ -157,8 +157,8 @@ export default function DLibrary() {
                 status={(n.status === "draft" ? "private" : n.status) as WorkStatus}
                 variant={i % 6}
                 src={n.cover_url ?? undefined}
-                onOpen={() => navigate(`/works/${n.id}/edit`)}
-                onWrite={() => navigate(`/works/${n.id}/edit`)}
+                onOpen={() => navigate(`/works/${n.id}/edit`, { state: { title: n.title } })}
+                onWrite={() => navigate(`/works/${n.id}/edit`, { state: { title: n.title } })}
                 onCover={() => navigate(`/works/${n.id}/cover`)}
                 onSell={() => navigate("/seller/register", { state: { novelId: n.id, title: n.title } })}
                 onDelete={() => setConfirmDeleteId(n.id)}
