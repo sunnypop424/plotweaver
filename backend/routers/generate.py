@@ -648,23 +648,32 @@ def generate_cover(novel_id: str, body: dict = Body(default={}), user=Depends(ge
 
     # ── 참고 이미지 분석 ──────────────────────────────────────────────────
     ref_images = body.get("refImages", [])
-    # ── 단체 의상 정보 — featured character 의 소속 세력 의상 반영 ─────────
+    # ── 세계관 단체 의상 반영 ────────────────────────────────────────────────
+    # costume 필드가 있는 세력만 추출
     world_factions_data = settings.get("worldFactionsData", [])
-    if world_factions_data and include_char:
-        featured = body.get("featuredCharNames", [])
+    faction_costumes = {f["name"]: f["costume"] for f in world_factions_data if f.get("costume")}
+
+    if faction_costumes and include_char:
+        # 등장 인물의 소속 세력 의상을 개인별로 지정
+        # — 의상이 없는 인물은 era·genre·역할로 AI가 추론
         characters = settings.get("characters", [])
-        # featured 인물이 속한 세력의 costume 수집
-        costume_hints = []
-        for char in characters:
-            if featured and char.get("name") not in featured:
-                continue
+        featured_names = body.get("featuredCharNames", [])
+        target_chars = (
+            [c for c in characters if c.get("name") in featured_names]
+            if featured_names
+            else characters
+        )
+        char_costume_hints = []
+        seen_factions: set[str] = set()
+        for char in target_chars:
             char_faction = char.get("faction", "")
-            for faction in world_factions_data:
-                if faction.get("name") == char_faction and faction.get("costume"):
-                    costume_hints.append(f"{char.get('name', '')} wearing {faction['costume']}")
-                    break
-        if costume_hints:
-            prompt_parts.append("Character costumes: " + "; ".join(costume_hints))
+            if char_faction in faction_costumes and char_faction not in seen_factions:
+                seen_factions.add(char_faction)
+                char_costume_hints.append(
+                    f"{char.get('name', '')} is wearing {faction_costumes[char_faction]}"
+                )
+        if char_costume_hints:
+            prompt_parts.append("Character costumes (follow exactly): " + "; ".join(char_costume_hints))
 
     if ref_images and isinstance(ref_images, list):
         ref_desc = _describe_ref_images([r for r in ref_images if isinstance(r, str)])
