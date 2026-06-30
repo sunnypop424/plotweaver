@@ -5,9 +5,10 @@ import { WorkCard, type Badge } from "@/components/WorkCard";
 import { TipModal } from "@/components/TipModal";
 import { useToast } from "@/components/Toast";
 import { useViewport } from "@/lib/useViewport";
-import { getNovel } from "@/lib/api";
+import { getNovel, listNovels } from "@/lib/api";
 
 type Mode = "sale" | "purchased";
+type OtherWork = { id: string; title: string; author: string; rating: string; price: string; badge: Badge; variant: number; src?: string };
 
 const DIST = [
   { star: 5, pct: 78 }, { star: 4, pct: 15 }, { star: 3, pct: 5 }, { star: 2, pct: 1 }, { star: 1, pct: 1 },
@@ -16,12 +17,6 @@ const REVIEWS = [
   { name: "책벌레김", initial: "책", stars: "★★★★★", text: "회귀물 좋아하면 무조건. 카엘 서사가 촘촘하고 사이다 타이밍이 완벽해요." },
   { name: "심야독자", initial: "심", stars: "★★★★★", text: "AI 보조작인데 문장이 어색하지 않아서 놀랐어요. 표지도 진짜 예쁨." },
   { name: "복수극매니아", initial: "복", stars: "★★★★☆", text: "중반부 전개가 조금 빠른 느낌이지만 전체적으로 만족. 완결까지 정주행했네요." },
-];
-const OTHER: { title: string; author: string; rating: string; price: string; badge: Badge; variant: number }[] = [
-  { title: "서리의 군주", author: "지훈", rating: "4.6", price: "2,500원", badge: "paid", variant: 5 },
-  { title: "검은 탑의 연인", author: "지훈", rating: "4.5", price: "", badge: "free", variant: 6 },
-  { title: "별을 삼킨 아이", author: "지훈", rating: "4.7", price: "3,500원", badge: "paid", variant: 7 },
-  { title: "폐허의 연금술사", author: "지훈", rating: "4.4", price: "", badge: "tip", variant: 4 },
 ];
 
 export default function MSalesPage() {
@@ -35,13 +30,38 @@ export default function MSalesPage() {
   const [tipOpen, setTipOpen] = useState(false);
   const [novelTitle, setNovelTitle] = useState("로딩 중...");
   const [genres, setGenres] = useState<string[]>([]);
+  const [coverUrl, setCoverUrl] = useState<string | undefined>(undefined);
+  const [others, setOthers] = useState<OtherWork[]>([]);
   useEffect(() => {
     if (!novelId || novelId === "null") return;
     getNovel(novelId)
       .then((n) => {
         setNovelTitle(n.title);
         setGenres(n.settings?.genres ?? []);
+        setCoverUrl(n.cover_url ?? undefined);
       })
+      .catch(() => {});
+  }, [novelId]);
+
+  // 작가의 다른 작품 — 공개/판매 중인 본인 작품 (현재 작품 제외)
+  useEffect(() => {
+    listNovels()
+      .then((ns) =>
+        setOthers(
+          ns
+            .filter((n) => n.id !== novelId && (n.status === "selling" || n.status === "public"))
+            .map((n, i) => ({
+              id: n.id,
+              title: n.title,
+              author: "",
+              rating: "",
+              price: "",
+              badge: (n.status === "selling" ? "paid" : "free") as Badge,
+              variant: i % 8,
+              src: n.cover_url ?? undefined,
+            }))
+        )
+      )
       .catch(() => {});
   }, [novelId]);
 
@@ -60,7 +80,7 @@ export default function MSalesPage() {
           {/* COVER */}
           <div style={isWide ? { width: 240, flexShrink: 0, position: "sticky", top: 80 } : { width: 180, margin: "0 auto 24px" }}>
             <div className="relative">
-              <CoverTile title={novelTitle} variant={0} />
+              <CoverTile title={novelTitle} variant={0} src={coverUrl} />
               {gated && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-lg p-5 text-center" style={{ backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)", background: "rgba(18,18,18,0.55)" }}>
                   <div className="flex h-12 w-12 items-center justify-center rounded-full border-[1.5px] border-white/40 bg-white/15 text-lg font-bold text-white">19</div>
@@ -184,14 +204,16 @@ export default function MSalesPage() {
         </div>
 
         {/* OTHER WORKS */}
-        <div className="mt-6">
-          <div className="mb-3.5 text-[17px] font-bold text-ink">작가의 다른 작품</div>
-          <div className="pw-scroll flex gap-4 overflow-x-auto pb-2.5">
-            {OTHER.map((w, i) => (
-              <WorkCard key={i} {...w} onOpen={() => navigate("/market")} className="w-40 flex-shrink-0" />
-            ))}
+        {others.length > 0 && (
+          <div className="mt-6">
+            <div className="mb-3.5 text-[17px] font-bold text-ink">작가의 다른 작품</div>
+            <div className="pw-scroll flex gap-4 overflow-x-auto pb-2.5">
+              {others.map((w) => (
+                <WorkCard key={w.id} {...w} onOpen={() => navigate(`/market/${w.id}`)} className="w-40 flex-shrink-0" />
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* TIP 후원 모달 (공통 컴포넌트 재사용) */}

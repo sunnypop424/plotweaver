@@ -5,7 +5,7 @@ import { useToast } from "@/components/Toast";
 import { GlobalNav } from "@/components/GlobalNav";
 import { listNovels } from "@/lib/api";
 
-type Work = { id: string; title: string; author: string; rating: string; price: string; badge: Badge; variant: number };
+type Work = { id: string; title: string; author: string; rating: string; price: string; badge: Badge; variant: number; src?: string };
 
 const FILTER_DEFS = [
   { key: "genre", label: "장르" },
@@ -36,9 +36,10 @@ export default function MMarketHome() {
           title: n.title,
           author: "",
           rating: "",
-          price: n.status === "selling" ? "" : "",
-          badge: n.status === "selling" ? "paid" : "free" as Badge,
+          price: "",
+          badge: (n.status === "selling" ? "paid" : "free") as Badge,
           variant: i % 8,
+          src: n.cover_url ?? undefined,
         }))
       ))
       .catch(() => {});

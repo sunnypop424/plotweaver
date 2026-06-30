@@ -2,13 +2,14 @@
 
 ## 터미널 1 — 백엔드
 ```bash
-cd ~/Desktop/creator/backend
-PYTHONPATH=~/Desktop/creator python -m uvicorn main:app --reload --port 8002
+cd ~/Desktop/plotweaver/backend
+PYTHONPATH=~/Desktop/plotweaver python -m uvicorn main:app --reload --port 8002
 ```
+> 최초 1회: `python -m pip install -r requirements.txt`
 
 ## 터미널 2 — 프론트엔드
 ```bash
-cd ~/Desktop/creator/web
+cd ~/Desktop/plotweaver/web
 npm run dev
 ```
 

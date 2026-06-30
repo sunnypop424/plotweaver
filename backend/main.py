@@ -33,6 +33,8 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5177")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[FRONTEND_URL, "http://localhost:5177", "http://localhost:5173", "http://localhost:4173"],
+    # 같은 와이파이의 폰(192.168.x.x / 10.x.x.x 등 사설 IP)에서 접속 허용
+    allow_origin_regex=r"http://(192\.168|10|172\.(1[6-9]|2\d|3[01]))\.[\d.]+(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

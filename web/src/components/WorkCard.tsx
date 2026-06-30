@@ -19,20 +19,25 @@ type Props = {
   price?: string;
   badge?: Badge;
   variant?: number;
+  src?: string;
   onOpen?: () => void;
   className?: string;
 };
 
-export function WorkCard({ title, author, rating, price = "", badge = "paid", variant = 0, onOpen, className = "" }: Props) {
+export function WorkCard({ title, author, rating, price = "", badge = "paid", variant = 0, src, onOpen, className = "" }: Props) {
   const bg = GRADIENTS[((variant % GRADIENTS.length) + GRADIENTS.length) % GRADIENTS.length];
-  const badgeText = badge === "free" ? "무료" : badge === "tip" ? "후원" : price;
+  const badgeText = badge === "free" ? "무료" : badge === "tip" ? "후원" : (price || "유료");
   // 호출부가 너비(w-…)를 주면 그걸 쓰고, 없으면 부모(그리드 셀)를 채우도록 w-full.
   const widthCls = /(^|\s)w-/.test(className) ? "" : "w-full";
 
   return (
     <button onClick={onOpen} className={`block cursor-pointer border-none bg-transparent p-0 text-left ${widthCls} ${className}`}>
       <div className="relative aspect-[3/4] w-full overflow-hidden rounded-lg bg-[#1a1a22] shadow-[0_2px_10px_rgba(0,0,0,0.12)] transition-all duration-200 hover:-translate-y-[3px] hover:shadow-[0_8px_20px_rgba(0,0,0,0.18)]">
-        <div className="absolute inset-0" style={{ background: bg }} />
+        {src ? (
+          <img src={src} alt={title} className="absolute inset-0 h-full w-full object-cover" />
+        ) : (
+          <div className="absolute inset-0" style={{ background: bg }} />
+        )}
         <div className="absolute left-2 top-2 rounded-full bg-black/[0.42] px-2 py-[3px] text-[9px] font-bold text-white">AI 생성</div>
         <div className="absolute inset-x-0 bottom-0 px-3 pb-3 pt-3.5" style={{ background: "linear-gradient(to top, rgba(0,0,0,0.74), rgba(0,0,0,0) 100%)" }}>
           <div className="text-base font-bold leading-[1.3] text-white" style={{ textShadow: "0 1px 4px rgba(0,0,0,0.4)" }}>{title}</div>
@@ -40,8 +45,12 @@ export function WorkCard({ title, author, rating, price = "", badge = "paid", va
       </div>
       <div className="mt-2.5 flex items-center justify-between gap-2">
         <div className="min-w-0">
-          <div className="text-[13px] font-bold text-brand">★ {rating}</div>
-          <div className="mt-0.5 truncate text-xs text-muted">글 · {author}</div>
+          {rating && <div className="text-[13px] font-bold text-brand">★ {rating}</div>}
+          {author ? (
+            <div className="mt-0.5 truncate text-xs text-muted">글 · {author}</div>
+          ) : !rating ? (
+            <div className="truncate text-xs text-muted">AI 보조 창작</div>
+          ) : null}
         </div>
         <span
           className={

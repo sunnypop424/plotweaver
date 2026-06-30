@@ -118,7 +118,7 @@ export default function DLibrary() {
           <div className="grid gap-5" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))" }}>
             {[0, 1, 2].map((i) => (
               <div key={i} className="overflow-hidden rounded-xl border border-hairline bg-white">
-                <div className="pw-skel aspect-[16/9]" style={{ height: "auto", borderRadius: 0 }} />
+                <div className="pw-skel aspect-[2/3]" style={{ height: "auto", borderRadius: 0 }} />
                 <div className="p-4">
                   <div className="mb-3.5 h-2 rounded-full bg-hairline" />
                   <div className="flex gap-[7px]">

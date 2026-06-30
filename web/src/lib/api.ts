@@ -4,7 +4,9 @@
  */
 import { supabase } from "./supabase";
 
-const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
+// VITE_API_URL이 있으면 그걸 쓰고, 없으면 접속한 호스트 기준으로 백엔드를 찾는다.
+// (폰에서 192.168.x.x로 접속하면 백엔드도 같은 IP:8002로 자동 연결)
+const BASE = import.meta.env.VITE_API_URL || `${window.location.protocol}//${window.location.hostname}:8002`;
 
 async function authHeader(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();

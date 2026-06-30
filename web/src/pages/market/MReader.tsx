@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { WorkCard, type Badge } from "@/components/WorkCard";
 import { useToast } from "@/components/Toast";
-import { getNovel, getChapter } from "@/lib/api";
+import { getNovel, getChapter, listNovels } from "@/lib/api";
 
 type ThemeKey = "light" | "sepia" | "dark";
 type Theme = {
@@ -15,11 +15,7 @@ const THEMES: Record<ThemeKey, Theme> = {
   dark: { name: "어둡게", bg: "#15131d", prose: "#cfc9da", title: "#f2f0f7", sub: "#8a849a", bar: "rgba(21,19,29,0.92)", hairline: "#2d2838", track: "#2d2838", swatch: "#15131d", swatchBorder: "#4a4458" },
 };
 
-const RECOMMEND: { title: string; author: string; rating: string; price: string; badge: Badge; variant: number }[] = [
-  { title: "서리의 군주", author: "강", rating: "4.6", price: "2,500원", badge: "paid", variant: 5 },
-  { title: "검은 탑의 연인", author: "유나", rating: "4.5", price: "", badge: "free", variant: 6 },
-  { title: "별을 삼킨 아이", author: "소리", rating: "4.7", price: "3,500원", badge: "paid", variant: 7 },
-];
+type Recommend = { id: string; title: string; author: string; rating: string; price: string; badge: Badge; variant: number; src?: string };
 
 export default function MReader() {
   const { showToast } = useToast();
@@ -38,6 +34,7 @@ export default function MReader() {
   const [genres, setGenres] = useState<string[]>([]);
   const [paragraphs, setParagraphs] = useState<string[]>([]);
   const [loadError, setLoadError] = useState(false);
+  const [recommend, setRecommend] = useState<Recommend[]>([]);
 
   useEffect(() => {
     if (!novelId) return;
@@ -53,6 +50,28 @@ export default function MReader() {
       .catch(() => setLoadError(true))
       .finally(() => setLoading(false));
   }, [novelId, seq]);
+
+  // 추천 작품 — 공개/판매 중인 본인 작품 (현재 작품 제외)
+  useEffect(() => {
+    listNovels()
+      .then((ns) =>
+        setRecommend(
+          ns
+            .filter((n) => n.id !== novelId && (n.status === "selling" || n.status === "public"))
+            .map((n, i) => ({
+              id: n.id,
+              title: n.title,
+              author: "",
+              rating: "",
+              price: "",
+              badge: (n.status === "selling" ? "paid" : "free") as Badge,
+              variant: i % 8,
+              src: n.cover_url ?? undefined,
+            }))
+        )
+      )
+      .catch(() => {});
+  }, [novelId]);
 
   const th = THEMES[theme];
   const dark = theme === "dark";
@@ -136,15 +155,17 @@ export default function MReader() {
             <div className="mt-9 text-center text-xs" style={{ color: th.sub }}>이 작품은 AI 보조로 창작되었습니다.</div>
 
             {/* RECOMMEND */}
-            <div className="mt-10 pt-8" style={{ borderTop: `1px solid ${th.hairline}` }}>
-              <div className="mb-1.5 text-center text-[15px] font-bold" style={{ color: th.title }}>이런 작품은 어때요?</div>
-              <div className="mb-[22px] text-center text-[13px]" style={{ color: th.sub }}>같은 장르의 추천 작품이에요.</div>
-              <div className="flex gap-3.5 overflow-x-auto pb-2">
-                {RECOMMEND.map((w, i) => (
-                  <WorkCard key={i} {...w} onOpen={() => navigate("/market")} className="w-[150px] flex-shrink-0" />
-                ))}
+            {recommend.length > 0 && (
+              <div className="mt-10 pt-8" style={{ borderTop: `1px solid ${th.hairline}` }}>
+                <div className="mb-1.5 text-center text-[15px] font-bold" style={{ color: th.title }}>이런 작품은 어때요?</div>
+                <div className="mb-[22px] text-center text-[13px]" style={{ color: th.sub }}>다른 작품도 읽어보세요.</div>
+                <div className="flex gap-3.5 overflow-x-auto pb-2">
+                  {recommend.map((w) => (
+                    <WorkCard key={w.id} {...w} onOpen={() => navigate(`/market/${w.id}`)} className="w-[150px] flex-shrink-0" />
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </>
         )}
       </div>

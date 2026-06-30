@@ -101,9 +101,12 @@ async def suggest_world(body: dict = Body(...), user=Depends(get_current_user)):
 
     msg = _ai().messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=3500,
+        max_tokens=8000,
         messages=[{"role": "user", "content": prompt}],
     )
+    if msg.stop_reason == "max_tokens":
+        logger.error("suggest_world truncated at max_tokens (output=%s)", msg.usage.output_tokens)
+        raise HTTPException(status_code=502, detail="세계관이 너무 길어 생성이 중단됐어요. 다시 시도해 주세요.")
     data = _parse_json(msg.content[0].text)
 
     # 색상 및 메타 추가 (parentIndex는 프론트에서 ID로 변환)
@@ -340,9 +343,12 @@ async def suggest_narrative(body: dict = Body(...), user=Depends(get_current_use
 
     msg = _ai().messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=1500,
+        max_tokens=2500,
         messages=[{"role": "user", "content": prompt}],
     )
+    if msg.stop_reason == "max_tokens":
+        logger.error("suggest_narrative truncated at max_tokens (output=%s)", msg.usage.output_tokens)
+        raise HTTPException(status_code=502, detail="서사 생성이 너무 길어 중단됐어요. 다시 시도해 주세요.")
     return _parse_json(msg.content[0].text)
 
 
@@ -359,9 +365,10 @@ async def suggest_title(body: dict = Body(...), user=Depends(get_current_user)):
     protagonist = next((c for c in characters if c.get("role") == "protagonist"), None)
     hero_name = protagonist.get("name", "") if protagonist else ""
 
-    prompt = f"""당신은 웹소설 제목 전문가입니다.
-아래 설정에 딱 맞는 웹소설 제목 후보 5개를 JSON으로 만들어주세요.
+    prompt = f"""당신은 한국 웹소설 제목 카피라이터입니다. 첫 줄만 보고도 클릭하게 만드는 '후킹 제목'을 뽑습니다.
+아래 설정에 맞는 제목 후보 6개를 JSON으로 만들어주세요.
 
+[설정]
 배경: {era}
 장르: {', '.join(genres) if genres else '미정'}
 주인공: {hero_name or '미정'}
@@ -370,18 +377,24 @@ async def suggest_title(body: dict = Body(...), user=Depends(get_current_user)):
 결말 방향: {ending or '없음'}
 시점: {pov or '없음'}
 
-반드시 아래 JSON만 응답하세요:
-{{"titles": ["제목1", "제목2", "제목3", "제목4", "제목5"]}}
+[요즘 한국 웹소설 제목 트렌드 — 참고만, 베끼지 말 것]
+- 상황·반전을 한 문장으로 압축한 '문장형' 제목이 대세
+  예) "전지적 독자 시점", "나 혼자만 레벨업", "악역의 엔딩은 죽음뿐", "내가 키운 S급들", "회귀한 천재 헌터의 일상"
+- 핵심 후크(회귀/빙의/정체 숨김/계약/먼치킨/반전)를 제목에 드러내 호기심을 건다
+- "~인 줄 알았다 / ~하기로 했다 / 알고 보니 ~ / ~가 되었다" 같은 어미로 궁금증 유발
 
-조건:
-- 한국 웹소설 감성에 맞는 제목 (2~8글자 혹은 짧은 문구)
-- 장르 느낌이 제목에서 바로 느껴지게
-- 주인공 이름이나 핵심 소재를 활용해도 좋음
-- 모두 다른 스타일로 (짧은 것, 긴 것, 명사형, 동사형 등 다양하게)"""
+반드시 아래 JSON만 응답하세요:
+{{"titles": ["제목1", "제목2", "제목3", "제목4", "제목5", "제목6"]}}
+
+[조건]
+- 6개 중 최소 4개는 긴 문장형(10~25자), 나머지는 임팩트 있는 짧은 제목(2~8자)
+- 이 작품만의 고유 소재(세계관·인물 이름·갈등)를 실제로 녹여서 진부하지 않게
+- 흔한 클리셰 범벅 금지 — 이 작품만의 '한 끗'을 제목에 담을 것
+- 장르 감성이 제목에서 바로 느껴지게, 모두 한국어"""
 
     msg = _ai().messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=300,
+        max_tokens=600,
         messages=[{"role": "user", "content": prompt}],
     )
     return _parse_json(msg.content[0].text)
@@ -505,7 +518,10 @@ async def review_chapter(body: dict = Body(...), user=Depends(get_current_user))
 
     msg = _ai().messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=2000,
+        max_tokens=4000,
         messages=[{"role": "user", "content": prompt}],
     )
+    if msg.stop_reason == "max_tokens":
+        logger.error("review_chapter truncated at max_tokens (output=%s)", msg.usage.output_tokens)
+        raise HTTPException(status_code=502, detail="검토 결과가 너무 길어 생성이 중단됐어요. 다시 시도해 주세요.")
     return _parse_json(msg.content[0].text)

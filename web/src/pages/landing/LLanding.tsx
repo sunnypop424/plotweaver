@@ -22,7 +22,7 @@ const POOL = [
   { title: "별을 삼킨 아이", author: "소리", variant: 0 },
 ];
 
-type LiveWork = { id: string; title: string; author: string; rating: string; price: string; badge: Badge; variant: number };
+type LiveWork = { id: string; title: string; author: string; rating: string; price: string; badge: Badge; variant: number; src?: string };
 
 export default function LLanding() {
   const { vw } = useViewport();
@@ -55,9 +55,10 @@ export default function LLanding() {
           title: n.title,
           author: "",
           rating: "",
-          price: n.status === "selling" ? "" : "",
-          badge: n.status === "selling" ? "paid" : "free" as Badge,
+          price: "",
+          badge: (n.status === "selling" ? "paid" : "free") as Badge,
           variant: i % 8,
+          src: n.cover_url ?? undefined,
         })));
       })
       .catch(() => {})

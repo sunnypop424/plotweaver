@@ -80,7 +80,10 @@ def update_novel(novel_id: str, body: dict = Body(...), user=Depends(get_current
     allowed = {k: body[k] for k in ("status", "title", "settings", "cover_url") if k in body}
     if not allowed:
         raise HTTPException(status_code=400, detail="업데이트할 항목이 없습니다")
-    result = db.table("novels").update(allowed).eq("id", novel_id).execute()
+    try:
+        result = db.table("novels").update(allowed).eq("id", novel_id).execute()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"작품 수정에 실패했어요: {str(e)[:200]}")
     return result.data[0] if result.data else {}
 
 

@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS novels (
   title       TEXT        NOT NULL,
   settings    JSONB       NOT NULL DEFAULT '{}',  -- 전체 설정 (캐릭터·관계·서사 포함)
   cover_url   TEXT,
-  status      TEXT        NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','published')),
+  status      TEXT        NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','private','public','selling')),
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
