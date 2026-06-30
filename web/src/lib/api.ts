@@ -136,7 +136,7 @@ export function generateChapter(novelId: string, seq = 1) {
   );
 }
 
-export function generateCover(novelId: string, opts?: { includeTitle?: boolean; includeAuthor?: boolean; includeChar?: boolean; featuredCharName?: string; authorName?: string; count?: number }) {
+export function generateCover(novelId: string, opts?: { includeTitle?: boolean; includeAuthor?: boolean; includeChar?: boolean; featuredCharNames?: string[]; authorName?: string; count?: number }) {
   return request<{ cover_url: string; cover_urls: string[] }>("POST", `/api/novels/${novelId}/cover`, { count: 4, ...opts });
 }
 

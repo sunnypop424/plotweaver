@@ -305,9 +305,12 @@ def generate_chapter(novel_id: str, body: GenerateChapterRequest, user=Depends(g
     return {"seq": body.seq, "content": text, "word_count": len(text)}
 
 
-def _build_char_prompt(settings: dict, include_char: bool, featured_char_name: str = "") -> str:
+def _build_char_prompt(settings: dict, include_char: bool, featured_char_names: list[str] | None = None) -> str:
     """인물 설정에서 표지용 캐릭터 묘사 블록 생성.
-    featured_char_name: 사용자가 직접 선택한 동반 인물 이름. 빈 문자열이면 자동 선택."""
+    featured_char_names: 사용자가 직접 선택한 동반 인물 이름 목록.
+      None → 자동 선택 (관계도 기반)
+      []   → 주인공 단독
+      [이름...] → 해당 인물들과 주인공 함께 등장"""
     if not include_char:
         return ""
     characters = settings.get("characters", [])
@@ -319,7 +322,6 @@ def _build_char_prompt(settings: dict, include_char: bool, featured_char_name: s
 
     def _desc(c: dict) -> str:
         parts = []
-        # 성별 → 영어 캐릭터 타입으로 변환
         gender = c.get("gender", "")
         if gender in ("여", "여성", "여자"):
             parts.append("beautiful young woman")
@@ -335,14 +337,11 @@ def _build_char_prompt(settings: dict, include_char: bool, featured_char_name: s
         return f"{c.get('name', '')} [{detail}]" if detail else c.get("name", "character")
 
     prot_desc = _desc(protagonist)
+    char_map = {c.get("name", ""): c for c in characters}
 
-    # 동반 인물 결정: 사용자 직접 지정 > 관계도 기반 자동 선택
-    key_char = None
-    if featured_char_name:
-        # 사용자가 직접 선택한 인물
-        key_char = next((c for c in characters if c.get("name") == featured_char_name), None)
-    else:
-        # 관계도 기반 자동 선택: 주인공과 연결된 조연/빌런 중 1명
+    # 동반 인물 결정
+    if featured_char_names is None:
+        # 자동 선택: 관계도 기반 조연 > 빌런 1명
         relationships = settings.get("relationships", [])
         pname = protagonist.get("name", "")
         related_names: set[str] = set()
@@ -352,24 +351,34 @@ def _build_char_prompt(settings: dict, include_char: bool, featured_char_name: s
             elif r.get("toChar") == pname:
                 related_names.add(r.get("fromChar", ""))
         related_names.discard("")
+        featured_chars = []
         for role in ("supporting", "villain"):
             candidates = [c for c in characters
                           if c.get("role") == role and c.get("name") in related_names]
             if candidates:
-                key_char = candidates[0]
+                featured_chars = [candidates[0]]
                 break
+    else:
+        featured_chars = [char_map[n] for n in featured_char_names if n in char_map]
 
-    if key_char:
-        key_desc = _desc(key_char)
+    if len(featured_chars) == 0:
+        return (
+            f"Feature the protagonist alone: {prot_desc}. "
+            "Protagonist is centered prominently with a dramatic, expressive pose that captures their personality. "
+        )
+    elif len(featured_chars) == 1:
+        key_desc = _desc(featured_chars[0])
         return (
             f"Characters in the scene — Protagonist: {prot_desc}, placed prominently in the foreground with a dramatic pose. "
             f"Key figure alongside protagonist: {key_desc}. "
             "Both characters must be clearly recognizable with expressive, dynamic poses that reflect their personalities. "
         )
     else:
+        others = "; ".join(_desc(c) for c in featured_chars)
         return (
-            f"Feature the protagonist alone: {prot_desc}. "
-            "Protagonist is centered prominently with a dramatic, expressive pose that captures their personality. "
+            f"Ensemble cast — Protagonist: {prot_desc} (centered, most prominent in composition). "
+            f"Supporting characters alongside protagonist: {others}. "
+            "All characters arranged in a dramatic group composition, each with expressive poses reflecting their personality. "
         )
 
 
@@ -393,7 +402,12 @@ def generate_cover(novel_id: str, body: dict = Body(default={}), user=Depends(ge
     include_title = body.get("includeTitle", False)
     include_author = body.get("includeAuthor", False)
     include_char = body.get("includeChar", True)
-    featured_char_name = (body.get("featuredCharName") or "").strip()
+    # featuredCharNames: 배열이면 직접 지정, 없으면(None) 자동 선택
+    raw_names = body.get("featuredCharNames")
+    featured_char_names: list[str] | None = (
+        [n.strip() for n in raw_names if isinstance(n, str) and n.strip()]
+        if isinstance(raw_names, list) else None
+    )
     author_name = body.get("authorName", "").strip()
 
     # ── 아트 스타일 ────────────────────────────────────────────────────────
@@ -491,7 +505,7 @@ def generate_cover(novel_id: str, body: dict = Body(default={}), user=Depends(ge
         title_space = "Leave clear negative space at the top third of the image for title text overlay."
 
     # ── 인물 묘사 블록 ─────────────────────────────────────────────────────
-    char_block = _build_char_prompt(settings, include_char, featured_char_name)
+    char_block = _build_char_prompt(settings, include_char, featured_char_names)
 
     # ── 대사·UI 텍스트 완전 금지 ──────────────────────────────────────────
     no_dialogue = (

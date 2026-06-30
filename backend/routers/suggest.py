@@ -24,19 +24,29 @@ def _ai():
     return _client
 
 def _parse_json(text: str) -> dict:
+    text = text.strip()
+    # 1. 직접 파싱 (Claude가 순수 JSON만 반환한 경우)
     try:
-        m = re.search(r"```(?:json)?\s*(\{[\s\S]+?\})\s*```", text)
-        if m:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    # 2. 마크다운 코드 블록 (greedy 매칭으로 중첩 괄호 안전하게 처리)
+    m = re.search(r"```(?:json)?\s*(\{[\s\S]+\})\s*```", text)
+    if m:
+        try:
             return json.loads(m.group(1))
-        m = re.search(r"\{[\s\S]+\}", text)
-        if m:
+        except json.JSONDecodeError:
+            pass
+    # 3. 텍스트 중 JSON 객체 추출 (greedy)
+    m = re.search(r"\{[\s\S]+\}", text)
+    if m:
+        try:
             return json.loads(m.group(0))
-        raise ValueError("JSON not found in response")
-    except (json.JSONDecodeError, ValueError) as e:
-        # Windows cp949 터미널에서 로그 출력 시 인코딩 오류 방지
-        safe_preview = text[:300].encode("ascii", "replace").decode("ascii")
-        logger.error("JSON parse failed: %s | preview: %s", e, safe_preview)
-        raise HTTPException(status_code=502, detail=f"AI 응답 파싱 실패: {e}")
+        except json.JSONDecodeError:
+            pass
+    safe_preview = text[:300].encode("ascii", "replace").decode("ascii")
+    logger.error("JSON parse failed | preview: %s", safe_preview)
+    raise HTTPException(status_code=502, detail="AI 응답 파싱 실패")
 
 
 @router.post("/world")

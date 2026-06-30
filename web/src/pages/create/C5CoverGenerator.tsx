@@ -21,8 +21,8 @@ export default function C5CoverGenerator() {
   const [style, setStyle] = useState<Hybrid>({ value: "웹툰풍", custom: false, text: "" });
   const [tone, setTone] = useState<Hybrid>({ value: "어두운", custom: false, text: "" });
   const [includeChar, setIncludeChar] = useState(true);
-  // 함께 등장시킬 인물 선택 ("" = 주인공 단독, 캐릭터 이름 = 해당 인물 동반)
-  const [featuredCharName, setFeaturedCharName] = useState("");
+  // 함께 등장시킬 인물 이름 배열 (빈 배열 = 주인공 단독, null = 자동선택)
+  const [featuredCharNames, setFeaturedCharNames] = useState<string[] | null>(null);
   const [includeTitle, setIncludeTitle] = useState(false);
   const [includeAuthor, setIncludeAuthor] = useState(false);
   const [authorName, setAuthorName] = useState("");
@@ -75,7 +75,7 @@ export default function C5CoverGenerator() {
         includeTitle,
         includeAuthor,
         includeChar,
-        featuredCharName: includeChar && featuredCharName ? featuredCharName : undefined,
+        featuredCharNames: includeChar && featuredCharNames !== null ? featuredCharNames : undefined,
         authorName: includeAuthor ? authorName : undefined,
       });
       setCoverUrls(res.cover_urls?.length ? res.cover_urls : [res.cover_url]);
@@ -167,7 +167,7 @@ export default function C5CoverGenerator() {
             <div className="mb-[22px] flex flex-col gap-3">
               {/* 인물 포함 토글 + 인물 선택 */}
               <div>
-                <button onClick={() => { setIncludeChar((v) => !v); if (includeChar) setFeaturedCharName(""); }} className="inline-flex items-center gap-2.5 py-0.5 text-sm font-bold text-ink">
+                <button onClick={() => { setIncludeChar((v) => !v); if (includeChar) setFeaturedCharNames(null); }} className="inline-flex items-center gap-2.5 py-0.5 text-sm font-bold text-ink">
                   <span className={"flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[13px] leading-none text-white transition-all " + (includeChar ? "border border-brand bg-brand" : "border border-line2 bg-white")}>
                     {includeChar ? "✓" : ""}
                   </span>
@@ -177,32 +177,54 @@ export default function C5CoverGenerator() {
                   const nonProts = (novelData?.settings?.characters ?? []).filter(c => c.role !== "protagonist");
                   if (nonProts.length === 0) return null;
                   const ROLE_LABEL: Record<string, string> = { villain: "빌런", supporting: "조연" };
+                  const toggleChar = (name: string) => {
+                    setFeaturedCharNames(prev => {
+                      const list = prev ?? [];
+                      return list.includes(name) ? list.filter(n => n !== name) : [...list, name];
+                    });
+                  };
+                  const isAuto = featuredCharNames === null;
+                  const selected = featuredCharNames ?? [];
                   return (
                     <div className="mt-2.5 flex flex-col gap-1.5 pl-[30px]" style={{ animation: "pw-fade .15s ease" }}>
-                      <div className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">함께 등장시킬 인물</div>
-                      {/* 주인공 단독 옵션 */}
+                      <div className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">함께 등장시킬 인물 (복수 선택 가능)</div>
+                      {/* 자동 선택 옵션 */}
                       <button
-                        onClick={() => setFeaturedCharName("")}
-                        className={"inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-[13px] font-bold transition " + (!featuredCharName ? "border-brand bg-wash text-brand" : "border-hairline bg-white text-ink2 hover:border-line2")}
+                        onClick={() => setFeaturedCharNames(null)}
+                        className={"inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-[13px] font-bold transition " + (isAuto ? "border-brand bg-wash text-brand" : "border-hairline bg-white text-ink2 hover:border-line2")}
                       >
-                        <span className="flex h-4 w-4 items-center justify-center rounded-full border text-[9px] font-bold" style={{ borderColor: !featuredCharName ? "#816bff" : "#e5e5e5", background: !featuredCharName ? "#816bff" : "white", color: "white" }}>
-                          {!featuredCharName ? "✓" : ""}
+                        <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border text-[9px] font-bold" style={{ borderColor: isAuto ? "#816bff" : "#e5e5e5", background: isAuto ? "#816bff" : "white", color: "white" }}>
+                          {isAuto ? "✓" : ""}
+                        </span>
+                        자동 선택
+                        <span className="ml-auto text-[10px] font-normal text-muted">관계도 기반</span>
+                      </button>
+                      {nonProts.map(c => {
+                        const on = selected.includes(c.name);
+                        return (
+                          <button
+                            key={c.name}
+                            onClick={() => toggleChar(c.name)}
+                            className={"inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-[13px] font-bold transition " + (on ? "border-brand bg-wash text-brand" : "border-hairline bg-white text-ink2 hover:border-line2")}
+                          >
+                            <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border text-[9px] font-bold" style={{ borderColor: on ? "#816bff" : "#e5e5e5", background: on ? "#816bff" : "white", color: "white" }}>
+                              {on ? "✓" : ""}
+                            </span>
+                            <span className="min-w-0 flex-1 truncate text-left">{c.name}</span>
+                            {c.role && <span className="rounded-full bg-[#f2f2f2] px-1.5 py-0.5 text-[10px] font-bold text-muted">{ROLE_LABEL[c.role] ?? c.role}</span>}
+                          </button>
+                        );
+                      })}
+                      {/* 주인공 단독 */}
+                      <button
+                        onClick={() => setFeaturedCharNames([])}
+                        className={"inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-[13px] font-bold transition " + (!isAuto && selected.length === 0 ? "border-brand bg-wash text-brand" : "border-hairline bg-white text-ink2 hover:border-line2")}
+                      >
+                        <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded border text-[9px] font-bold" style={{ borderColor: (!isAuto && selected.length === 0) ? "#816bff" : "#e5e5e5", background: (!isAuto && selected.length === 0) ? "#816bff" : "white", color: "white" }}>
+                          {(!isAuto && selected.length === 0) ? "✓" : ""}
                         </span>
                         주인공 단독
                       </button>
-                      {nonProts.map(c => (
-                        <button
-                          key={c.name}
-                          onClick={() => setFeaturedCharName(c.name)}
-                          className={"inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-[13px] font-bold transition " + (featuredCharName === c.name ? "border-brand bg-wash text-brand" : "border-hairline bg-white text-ink2 hover:border-line2")}
-                        >
-                          <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border text-[9px] font-bold" style={{ borderColor: featuredCharName === c.name ? "#816bff" : "#e5e5e5", background: featuredCharName === c.name ? "#816bff" : "white", color: "white" }}>
-                            {featuredCharName === c.name ? "✓" : ""}
-                          </span>
-                          <span className="min-w-0 flex-1 truncate text-left">{c.name}</span>
-                          {c.role && <span className="rounded-full bg-[#f2f2f2] px-1.5 py-0.5 text-[10px] font-bold text-muted">{ROLE_LABEL[c.role] ?? c.role}</span>}
-                        </button>
-                      ))}
                     </div>
                   );
                 })()}

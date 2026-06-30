@@ -350,22 +350,6 @@ export default function C0WorldWizard() {
             {/* ============ TAB 1 · 설정 ============ */}
             {tab === "settings" && (
               <div>
-                {/* AI generate */}
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3.5 rounded-lg border border-wash-border bg-wash px-[18px] py-4">
-                  <div className="min-w-[200px]">
-                    <div className="text-[15px] font-bold text-ink">막막하다면, AI에게 맡겨보세요</div>
-                    <div className="mt-[3px] text-[13px] text-ink2">시대·장르에 맞춰 세력·계급·용어 초안을 한 번에 채워드려요.</div>
-                  </div>
-                  {aiLoading ? (
-                    <button disabled className="pw-btn-primary h-11 px-[18px] text-[15px] opacity-90" style={{ cursor: "default" }}>
-                      <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                      생성 중...
-                    </button>
-                  ) : (
-                    <button onClick={aiAutofill} className="pw-btn-primary h-11 whitespace-nowrap px-[18px] text-[15px]">✦ AI 세계관 자동 생성</button>
-                  )}
-                </div>
-
                 {/* 기반: 시대 + 장르 */}
                 <div className="pw-card mb-4 p-6">
                   <div className="mb-4 text-sm font-bold text-ink">기반</div>
@@ -409,6 +393,22 @@ export default function C0WorldWizard() {
                       <span className="text-[12px] font-bold text-brand">{kit.label}</span>
                     </div>
                   </div>
+                </div>
+
+                {/* AI generate — 시대·장르 설정 후 위치 */}
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3.5 rounded-lg border border-wash-border bg-wash px-[18px] py-4">
+                  <div className="min-w-[200px]">
+                    <div className="text-[15px] font-bold text-ink">막막하다면, AI에게 맡겨보세요</div>
+                    <div className="mt-[3px] text-[13px] text-ink2">시대·장르에 맞춰 세력·계급·용어 초안을 한 번에 채워드려요.</div>
+                  </div>
+                  {aiLoading ? (
+                    <button disabled className="pw-btn-primary h-11 px-[18px] text-[15px] opacity-90" style={{ cursor: "default" }}>
+                      <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                      생성 중...
+                    </button>
+                  ) : (
+                    <button onClick={aiAutofill} className="pw-btn-primary h-11 whitespace-nowrap px-[18px] text-[15px]">✦ AI 세계관 자동 생성</button>
+                  )}
                 </div>
 
                 {/* 국가·세력 */}

@@ -206,10 +206,22 @@ export default function C1SettingsWizard() {
 
           {/* AI assist */}
           <div className="mb-5 rounded-lg border border-wash-border bg-wash px-[18px] py-4">
+            <div className="mb-3">
+              <div className="text-[15px] font-bold text-ink">막막하다면, AI에게 맡겨보세요</div>
+              <div className="mt-[3px] text-[13px] text-ink2">세계관에 어울리는 인물을 한 번에 채워드려요. 언제든 수정할 수 있어요.</div>
+            </div>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="min-w-[200px]">
-                <div className="text-[15px] font-bold text-ink">막막하다면, AI에게 맡겨보세요</div>
-                <div className="mt-[3px] text-[13px] text-ink2">세계관에 어울리는 인물을 한 번에 채워드려요. 언제든 수정할 수 있어요.</div>
+              <div className="flex items-center gap-2">
+                <span className="text-[12px] font-bold text-muted">인물 수</span>
+                {[3, 5, 7, 10].map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => setAiCount(n)}
+                    className={"h-7 min-w-[34px] rounded-md px-2 text-[13px] font-bold transition " + (aiCount === n ? "bg-brand text-white" : "bg-white border border-line2 text-ink2 hover:border-brand hover:text-brand")}
+                  >
+                    {n}
+                  </button>
+                ))}
               </div>
               {aiLoading ? (
                 <button disabled className="pw-btn-primary h-11 px-[18px] text-[15px] opacity-90" style={{ cursor: "default" }}>
@@ -221,18 +233,6 @@ export default function C1SettingsWizard() {
                   ✦ AI 추천 자동채움 ({aiCount}명)
                 </button>
               )}
-            </div>
-            <div className="mt-3 flex items-center gap-2">
-              <span className="text-[12px] font-bold text-muted">인물 수</span>
-              {[3, 5, 7, 10].map((n) => (
-                <button
-                  key={n}
-                  onClick={() => setAiCount(n)}
-                  className={"h-7 min-w-[34px] rounded-md px-2 text-[13px] font-bold transition " + (aiCount === n ? "bg-brand text-white" : "bg-white border border-line2 text-ink2 hover:border-brand hover:text-brand")}
-                >
-                  {n}
-                </button>
-              ))}
             </div>
           </div>
 
