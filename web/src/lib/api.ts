@@ -152,7 +152,7 @@ export function getChapter(novelId: string, seq: number) {
 
 // ── AI 자동완성 제안 ────────────────────────────────────────────────────
 export interface WorldSuggestion {
-  factions: { name: string; category: string; leader: string; color: string; desc: string; categoryCustom: boolean; parentId: string; parentIndex: number }[];
+  factions: { name: string; category: string; leader: string; color: string; desc: string; costume: string; categoryCustom: boolean; parentId: string; parentIndex: number }[];
   ranks: { name: string; desc: string; variants: string[] }[];
   glossary: { term: string; category: string; meaning: string; categoryCustom: boolean }[];
   worldRules: string;

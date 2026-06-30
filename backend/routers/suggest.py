@@ -72,7 +72,7 @@ async def suggest_world(body: dict = Body(...), user=Depends(get_current_user)):
 
 {{
   "factions": [
-    {{"name": "세력명", "category": "분류({cats_instr})", "leader": "수장 직함", "desc": "한 줄 설명", "parentIndex": -1}}
+    {{"name": "세력명", "category": "분류({cats_instr})", "leader": "수장 직함", "desc": "한 줄 설명", "costume": "단체 복식·의상 설명 (없으면 빈 문자열)", "parentIndex": -1}}
   ],
   "ranks": [
     {{"name": "계급명", "desc": "설명", "variants": ["세부직위1", "세부직위2"]}}
@@ -93,6 +93,7 @@ async def suggest_world(body: dict = Body(...), user=Depends(get_current_user)):
 [핵심 조건]
 - factions 3~5개, glossary 4~6개, regions 각 세력 거점 + 중립지대(factionIndex=-1), mapEdges 2~4개
 - parentIndex: 상위 소속 세력이 있으면 factions 배열 내 0-기반 인덱스, 없으면 -1
+- costume: 이 세력·집단의 단체 복식·의상을 1문장으로 묘사. 교복·단복·갑옷 등. 없으면 ""
 - ranks는 반드시 factions에서 사용한 수장 직함(leader)을 최상위 계급으로 포함해야 합니다.
   예) 세력 수장이 "장문인"이면 ranks에 {{"name":"장문인","desc":"문파 최고 수장","variants":[]}}가 있어야 합니다.
 - ranks 전체 계급은 모든 세력을 아우르는 통합 체계로 4~6개, 상위→하위 순으로 작성

@@ -31,8 +31,9 @@ export default function WizardLayout() {
   const isEditMode = !!wizData.editingNovelId;
 
   const handleBack = () => {
-    if (isEditMode && step === 1) {
-      // 편집 진입 경로로 복귀 (에디터 or 작품 상세)
+    if (isEditMode) {
+      // 편집 모드에서 뒤로가기는 항상 진입 이전 페이지로 (에디터 or 작품 상세)
+      // 스텝 간 이동은 헤더 스텝 클릭으로 대체
       navigate(wizData.returnTo ?? `/works/${wizData.editingNovelId}`);
     } else {
       navigate(PREV[step] ?? "/library");

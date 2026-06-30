@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useEffect, useCallback, type React
 import type { NovelSettings } from "@/lib/api";
 
 /* ── C0 세계관 전체 객체 타입 (뒤로가기 복원용) ─────────────────────────── */
-export type WFaction  = { id: number; name: string; color: string; category: string; categoryCustom: boolean; leader: string; parentId: string; desc: string };
+export type WFaction  = { id: number; name: string; color: string; category: string; categoryCustom: boolean; leader: string; parentId: string; desc: string; costume: string };
 export type WRank     = { id: number; name: string; desc: string; variants: string[] };
 export type WRegion   = { id: number; name: string; factionId: number | ""; desc: string; x: number; y: number };
 export type WMapEdge  = { id: number; from: number; to: number; label: string; labelCustom: boolean; desc: string };

@@ -105,14 +105,23 @@ def _build_novel(settings: dict) -> NovelSettings:
     glossary_dict = settings.get("glossaryDict", {})
     glossary_text = "\n".join(f"- {k}: {v}" for k, v in glossary_dict.items()) if glossary_dict else ""
     world_rules = settings.get("worldRules", "")
-    # 세력/계급 정보 추가
+    # 세력/계급/의상 정보 추가
     world_factions = settings.get("worldFactions", [])
     world_ranks = settings.get("worldRanks", [])
+    world_factions_data = settings.get("worldFactionsData", [])
     extra_parts = []
     if world_factions:
         extra_parts.append("[주요 세력] " + ", ".join(world_factions))
     if world_ranks:
         extra_parts.append("[계급 체계] " + ", ".join(world_ranks))
+    # 단체 의상 정보 — 세력별 costume 필드가 있으면 프롬프트에 포함
+    costume_lines = [
+        f"  - {f['name']}: {f['costume']}"
+        for f in world_factions_data
+        if f.get("costume")
+    ]
+    if costume_lines:
+        extra_parts.append("[단체 의상]\n" + "\n".join(costume_lines))
     if extra_parts:
         world_rules = (world_rules + "\n" if world_rules else "") + "\n".join(extra_parts)
     if glossary_text:
@@ -639,6 +648,24 @@ def generate_cover(novel_id: str, body: dict = Body(default={}), user=Depends(ge
 
     # ── 참고 이미지 분석 ──────────────────────────────────────────────────
     ref_images = body.get("refImages", [])
+    # ── 단체 의상 정보 — featured character 의 소속 세력 의상 반영 ─────────
+    world_factions_data = settings.get("worldFactionsData", [])
+    if world_factions_data and include_char:
+        featured = body.get("featuredCharNames", [])
+        characters = settings.get("characters", [])
+        # featured 인물이 속한 세력의 costume 수집
+        costume_hints = []
+        for char in characters:
+            if featured and char.get("name") not in featured:
+                continue
+            char_faction = char.get("faction", "")
+            for faction in world_factions_data:
+                if faction.get("name") == char_faction and faction.get("costume"):
+                    costume_hints.append(f"{char.get('name', '')} wearing {faction['costume']}")
+                    break
+        if costume_hints:
+            prompt_parts.append("Character costumes: " + "; ".join(costume_hints))
+
     if ref_images and isinstance(ref_images, list):
         ref_desc = _describe_ref_images([r for r in ref_images if isinstance(r, str)])
         if ref_desc:

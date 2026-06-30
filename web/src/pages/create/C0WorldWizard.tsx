@@ -35,7 +35,7 @@ const kitFor = (e: string) =>
   : "generic";
 
 /* ── 타입 ────────────────────────────────────────────────────────────── */
-type Faction = { id: number; name: string; color: string; category: string; categoryCustom: boolean; leader: string; parentId: string; desc: string };
+type Faction = { id: number; name: string; color: string; category: string; categoryCustom: boolean; leader: string; parentId: string; desc: string; costume: string };
 type Rank = { id: number; name: string; desc: string; variants: string[] };
 type Term = { id: number; term: string; category: string; categoryCustom: boolean; meaning: string };
 type Region = { id: number; name: string; factionId: number | ""; desc: string; x: number; y: number };
@@ -121,7 +121,7 @@ export default function C0WorldWizard() {
 
   /* ── 액션: 세력 ─────────────────────────────────────────────────────── */
   const updateFaction = (id: number, patch: Partial<Faction>) => setFactions((fs) => fs.map((f) => (f.id === id ? { ...f, ...patch } : f)));
-  const addFaction = () => setFactions((fs) => [...fs, { id: ++fid.current, name: "", color: PALETTE[fs.length % PALETTE.length], category: "", categoryCustom: false, leader: "", parentId: "", desc: "" }]);
+  const addFaction = () => setFactions((fs) => [...fs, { id: ++fid.current, name: "", color: PALETTE[fs.length % PALETTE.length], category: "", categoryCustom: false, leader: "", parentId: "", desc: "", costume: "" }]);
   const removeFaction = (id: number) => {
     setFactions((fs) => fs.filter((f) => f.id !== id));
     setRegions((rs) => rs.map((r) => (r.factionId === id ? { ...r, factionId: "" } : r)));
@@ -198,7 +198,7 @@ export default function C0WorldWizard() {
     const synopsis = wizData.goal || "";
     try {
       const res = await suggestWorld({ era: eraVal, genres, synopsis, worldRules, factionCats: kit.factionCats });
-      const rawFactions = res.factions.map((f) => ({ ...f, id: ++fid.current }));
+      const rawFactions = res.factions.map((f) => ({ ...f, id: ++fid.current, costume: f.costume ?? "" }));
       // parentIndex → 실제 ID로 매핑
       const newFactions = rawFactions.map((f, i) => ({
         ...f,
@@ -245,7 +245,7 @@ export default function C0WorldWizard() {
     setMapAutoLoading(true);
     try {
       const res = await suggestWorld({ era: eraVal, genres, synopsis: wizData.goal || "", worldRules, factionCats: kit.factionCats });
-      const rawFacs = factions.length ? factions : res.factions.map((f) => ({ ...f, id: ++fid.current }));
+      const rawFacs = factions.length ? factions : res.factions.map((f) => ({ ...f, id: ++fid.current, costume: (f as typeof f & { costume?: string }).costume ?? "" }));
       const newFactions = factions.length ? rawFacs : rawFacs.map((f, i) => ({
         ...f,
         parentId: res.factions[i]?.parentIndex >= 0 && rawFacs[res.factions[i].parentIndex]
@@ -463,6 +463,11 @@ export default function C0WorldWizard() {
                       <div className="mb-3.5">
                         <div className="mb-1.5 pw-field-label">한 줄 설명 <span className="font-normal text-muted">(선택)</span></div>
                         <input value={f.desc} onChange={(e) => updateFaction(f.id, { desc: e.target.value })} placeholder="예: 정파 명문 검파" className="pw-input text-[15px]" style={{ height: 46 }} />
+                      </div>
+
+                      <div className="mb-3.5">
+                        <div className="mb-1.5 pw-field-label">단체 의상 <span className="font-normal text-muted">(선택) · 인물 묘사·표지 생성에 참고돼요</span></div>
+                        <input value={f.costume ?? ""} onChange={(e) => updateFaction(f.id, { costume: e.target.value })} placeholder="예: 검붉은 망토, 금장 견장, 가슴에 독수리 문장" className="pw-input text-[15px]" style={{ height: 46 }} />
                       </div>
 
                       <div>
