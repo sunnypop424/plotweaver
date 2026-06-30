@@ -1,12 +1,13 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { CoverTile } from "@/components/CoverTile";
 import { WorkCard, type Badge } from "@/components/WorkCard";
 import { TipModal } from "@/components/TipModal";
 import { useToast } from "@/components/Toast";
 import { useViewport } from "@/lib/useViewport";
+import { getNovel } from "@/lib/api";
 
-type Mode = "sale" | "purchased" | "gate" | "sold";
+type Mode = "sale" | "purchased";
 
 const DIST = [
   { star: 5, pct: 78 }, { star: 4, pct: 15 }, { star: 3, pct: 5 }, { star: 2, pct: 1 }, { star: 1, pct: 1 },
@@ -27,12 +28,24 @@ export default function MSalesPage() {
   const { vw } = useViewport();
   const { showToast } = useToast();
   const navigate = useNavigate();
+  const { id: novelId } = useParams<{ id: string }>();
   const isWide = vw >= 768;
 
   const [mode, setMode] = useState<Mode>("sale");
   const [tipOpen, setTipOpen] = useState(false);
+  const [novelTitle, setNovelTitle] = useState("로딩 중...");
+  const [genres, setGenres] = useState<string[]>([]);
+  useEffect(() => {
+    if (!novelId || novelId === "null") return;
+    getNovel(novelId)
+      .then((n) => {
+        setNovelTitle(n.title);
+        setGenres(n.settings?.genres ?? []);
+      })
+      .catch(() => {});
+  }, [novelId]);
 
-  const gated = mode === "gate";
+  const gated = false;
 
   return (
     <div className="min-h-screen bg-canvas">
@@ -47,7 +60,7 @@ export default function MSalesPage() {
           {/* COVER */}
           <div style={isWide ? { width: 240, flexShrink: 0, position: "sticky", top: 80 } : { width: 180, margin: "0 auto 24px" }}>
             <div className="relative">
-              <CoverTile title="회귀한 검, 황혼을 베다" author="지훈" variant={0} />
+              <CoverTile title={novelTitle} variant={0} />
               {gated && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-lg p-5 text-center" style={{ backdropFilter: "blur(14px)", WebkitBackdropFilter: "blur(14px)", background: "rgba(18,18,18,0.55)" }}>
                   <div className="flex h-12 w-12 items-center justify-center rounded-full border-[1.5px] border-white/40 bg-white/15 text-lg font-bold text-white">19</div>
@@ -64,8 +77,8 @@ export default function MSalesPage() {
               <span className={"rounded-full px-2.5 py-1 text-[11px] font-bold " + (gated ? "bg-error-wash text-error" : "bg-[#f2f2f2] text-ink2")}>{gated ? "19세 이용가" : "전체 이용가"}</span>
             </div>
 
-            <h1 className="m-0 text-[28px] font-bold leading-[1.3] tracking-[-0.6px] text-ink">회귀한 검, 황혼을 베다</h1>
-            <div className="mt-2 text-[15px] text-ink2">글 · 지훈 &nbsp;·&nbsp; 회귀 · 복수 · 다크판타지</div>
+            <h1 className="m-0 text-[28px] font-bold leading-[1.3] tracking-[-0.6px] text-ink">{novelTitle}</h1>
+            <div className="mt-2 text-[15px] text-ink2">{genres.length > 0 ? genres.join(" · ") : ""}</div>
 
             <div className="mt-4 flex flex-wrap items-center gap-4">
               <div className="flex items-center gap-1.5">
@@ -82,7 +95,7 @@ export default function MSalesPage() {
               ))}
             </div>
 
-            <button onClick={() => navigate("/read/1")} className="mt-[22px] h-12 w-full rounded border border-brand bg-white text-[15px] font-bold text-brand transition hover:bg-wash">무료 미리보기 1~2화 ▷</button>
+            <button onClick={() => navigate(`/read/${novelId}`, { state: { seq: 1 } })} className="mt-[22px] h-12 w-full rounded border border-brand bg-white text-[15px] font-bold text-brand transition hover:bg-wash">무료 미리보기 1~2화 ▷</button>
 
             {/* PRICE BOX */}
             <div className="mt-4 rounded-xl border border-hairline bg-white p-5">
@@ -98,13 +111,8 @@ export default function MSalesPage() {
                     <span className="flex h-[22px] w-[22px] items-center justify-center rounded-full bg-brand text-[13px] font-bold text-white">✓</span>
                     <span className="text-[15px] font-bold text-ink">구매 완료 · 전체 회차 열람 가능</span>
                   </div>
-                  <button onClick={() => navigate("/read/1")} className="mb-2.5 h-[52px] w-full rounded border-none bg-brand text-base font-bold text-white transition hover:bg-brand-hover">이어서 읽기 (5화)</button>
+                  <button onClick={() => navigate(`/read/${novelId}`, { state: { seq: 1 } })} className="mb-2.5 h-[52px] w-full rounded border-none bg-brand text-base font-bold text-white transition hover:bg-brand-hover">이어서 읽기 (1화)</button>
                   <button onClick={() => setTipOpen(true)} className="h-12 w-full rounded border border-brand bg-white text-[15px] font-bold text-brand transition hover:bg-wash">♥ 작가 응원하기</button>
-                </div>
-              ) : mode === "sold" ? (
-                <div className="py-1.5 text-center">
-                  <div className="text-[15px] font-bold text-muted">현재 판매 중지된 작품이에요</div>
-                  <div className="mt-1.5 text-[13px] text-[#b4b4b4]">작가의 사정으로 판매가 일시 중단되었습니다.</div>
                 </div>
               ) : (
                 <div>
@@ -180,31 +188,15 @@ export default function MSalesPage() {
           <div className="mb-3.5 text-[17px] font-bold text-ink">작가의 다른 작품</div>
           <div className="pw-scroll flex gap-4 overflow-x-auto pb-2.5">
             {OTHER.map((w, i) => (
-              <WorkCard key={i} {...w} onOpen={() => navigate("/market/1")} className="w-40 flex-shrink-0" />
+              <WorkCard key={i} {...w} onOpen={() => navigate("/market")} className="w-40 flex-shrink-0" />
             ))}
           </div>
         </div>
       </div>
 
       {/* TIP 후원 모달 (공통 컴포넌트 재사용) */}
-      <TipModal open={tipOpen} onClose={() => setTipOpen(false)} workTitle="회귀한 검" initialBalance={2000} onToast={showToast} />
-
-      {/* demo switcher */}
-      <div className="fixed bottom-4 right-4 z-50 flex gap-1 rounded-full border border-hairline bg-white p-1 shadow-[0_2px_12px_rgba(0,0,0,0.1)]">
-        <DemoSeg active={mode === "sale"} onClick={() => { setMode("sale"); setTipOpen(false); }}>미구매</DemoSeg>
-        <DemoSeg active={mode === "purchased"} onClick={() => { setMode("purchased"); setTipOpen(false); }}>구매완료</DemoSeg>
-        <DemoSeg active={gated} onClick={() => { setMode("gate"); setTipOpen(false); }}>19금</DemoSeg>
-        <DemoSeg active={mode === "sold"} onClick={() => { setMode("sold"); setTipOpen(false); }}>품절</DemoSeg>
-      </div>
+      <TipModal open={tipOpen} onClose={() => setTipOpen(false)} workTitle={novelTitle} initialBalance={2000} onToast={showToast} />
 
     </div>
-  );
-}
-
-function DemoSeg({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button onClick={onClick} className={"rounded-full px-[11px] py-[7px] text-xs font-bold transition " + (active ? "bg-brand text-white" : "bg-transparent text-muted")}>
-      {children}
-    </button>
   );
 }

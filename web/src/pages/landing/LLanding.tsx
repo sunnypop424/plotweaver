@@ -4,6 +4,7 @@ import { CoverTile } from "@/components/CoverTile";
 import { WorkCard, type Badge } from "@/components/WorkCard";
 import { useToast } from "@/components/Toast";
 import { useViewport } from "@/lib/useViewport";
+import { listNovels } from "@/lib/api";
 
 // TODO: 실제 AI 표지 렌더로 교체 — 각 항목에 src 추가 시 CoverTile이 이미지를 사용
 const POOL = [
@@ -21,13 +22,7 @@ const POOL = [
   { title: "별을 삼킨 아이", author: "소리", variant: 0 },
 ];
 
-const WORKS: { title: string; author: string; rating: string; price: string; badge: Badge; variant: number }[] = [
-  { title: "회귀한 검사", author: "지훈", rating: "4.8", price: "3,000원", badge: "paid", variant: 0 },
-  { title: "악녀의 일기", author: "세라", rating: "4.6", price: "", badge: "free", variant: 2 },
-  { title: "현대 마법사", author: "도윤", rating: "4.7", price: "", badge: "tip", variant: 3 },
-  { title: "황혼의 기사단", author: "린", rating: "4.9", price: "4,500원", badge: "paid", variant: 1 },
-  { title: "폐허의 연금술사", author: "하루", rating: "4.5", price: "", badge: "free", variant: 4 },
-];
+type LiveWork = { id: string; title: string; author: string; rating: string; price: string; badge: Badge; variant: number };
 
 export default function LLanding() {
   const { vw } = useViewport();
@@ -46,14 +41,27 @@ export default function LLanding() {
   };
 
   const [loadingWorks, setLoadingWorks] = useState(true);
+  const [liveWorks, setLiveWorks] = useState<LiveWork[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const carRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const t = window.setTimeout(() => setLoadingWorks(false), 1300);
-    return () => window.clearTimeout(t);
+    listNovels()
+      .then((ns) => {
+        setLiveWorks(ns.map((n, i) => ({
+          id: n.id,
+          title: n.title,
+          author: "",
+          rating: "",
+          price: n.status === "selling" ? "" : "",
+          badge: n.status === "selling" ? "paid" : "free" as Badge,
+          variant: i % 8,
+        })));
+      })
+      .catch(() => {})
+      .finally(() => setLoadingWorks(false));
   }, []);
 
   // 스크롤 진입 시 섹션 reveal
@@ -200,9 +208,14 @@ export default function LLanding() {
           </div>
         ) : (
           <div ref={carRef} className="pw-scroll flex gap-[18px] overflow-x-auto pb-2.5" style={{ scrollBehavior: "smooth" }}>
-            {WORKS.map((w, i) => (
-              <WorkCard key={i} {...w} onOpen={() => navigate(`/market/${i + 1}`)} className="w-[190px] flex-shrink-0" />
-            ))}
+            {liveWorks.length === 0
+              ? POOL.slice(0, 5).map((p, i) => (
+                  <WorkCard key={i} title={p.title} author={p.author} rating="" price="" badge="free" variant={p.variant} onOpen={() => navigate("/market")} className="w-[190px] flex-shrink-0" />
+                ))
+              : liveWorks.map((w) => (
+                  <WorkCard key={w.id} {...w} onOpen={() => navigate(`/market/${w.id}`)} className="w-[190px] flex-shrink-0" />
+                ))
+            }
           </div>
         )}
       </div>

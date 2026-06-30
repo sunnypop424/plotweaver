@@ -49,6 +49,22 @@ def generate(role, system, user, *, label="", cache_system=None, max_tokens=None
     )
     text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
     _log_tokens(resp.usage, model, role, label)
+
+    # max_tokens에 걸려 문장이 잘렸으면 1회 이어쓰기 (산문 전용)
+    if role == "prose" and getattr(resp, "stop_reason", None) == "max_tokens":
+        cont_resp = client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=sys_blocks,
+            messages=[
+                {"role": "user", "content": user},
+                {"role": "assistant", "content": text},
+            ],
+        )
+        cont_text = "".join(b.text for b in cont_resp.content if getattr(b, "type", "") == "text")
+        _log_tokens(cont_resp.usage, model, role, label + "-resume")
+        text = text + cont_text
+
     return text
 
 

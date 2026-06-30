@@ -1,7 +1,10 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { RadioPill } from "@/components/ui/RadioPill";
+import { useToast } from "@/components/Toast";
 import { useViewport } from "@/lib/useViewport";
+import { useWizard } from "@/providers/WizardProvider";
+import { createNovel, updateNovel, suggestTitle } from "@/lib/api";
 
 const POV_OPTS = ["1인칭 주인공", "1인칭 관찰자", "3인칭 전지적", "3인칭 제한적"];
 const UNIT_OPTS = [{ k: "1회차씩", l: "1회차씩" }, { k: "일괄", l: "일괄 생성" }];
@@ -14,35 +17,98 @@ const LENGTH_OPTS = [
 const RATING_DEFS = [{ k: "all", l: "전체 이용가" }, { k: "15", l: "15세" }, { k: "19", l: "19세" }] as const;
 const TONE_OPTS = ["간결·속도감", "서정·묘사 중심", "유머·경쾌", "진중·무게감"];
 const COVER_OPTS = ["웹툰풍", "유화풍", "미니멀 타이포", "실사풍"];
-const AI_TITLES = ["회귀한 검, 황혼을 베다", "두 번째 검의 맹세", "복수는 회귀로부터", "잿빛 검의 회귀", "황혼의 검사"];
-const PREV = { era: "중세 유럽", genres: "회귀 · 복수", chars: "카엘(주인공) 외 2명", goal: "복수", ending: "복수 완성" };
+const PARA_OPTS = [
+  { v: "짧게", l: "짧게", desc: "1~3문장 · 속도감·긴장감" },
+  { v: "중간", l: "중간", desc: "3~5문장 · 일반 웹소설 호흡" },
+  { v: "길게", l: "길게", desc: "5~9문장 · 서정·심리 묘사" },
+];
 
 export default function COutputWizard() {
   const { isMobile, isDesktop } = useViewport();
   const navigate = useNavigate();
-  const titleT = useRef<number | undefined>(undefined);
+  const { data: wizData, saveOutput, setNovelId, clearEditMode } = useWizard();
+  const editingNovelId = wizData.editingNovelId;
+  const { showToast } = useToast();
+  const [submitting, setSubmitting] = useState(false);
 
-  const [pov, setPov] = useState("3인칭 전지적");
-  const [count, setCount] = useState({ value: "30화", custom: false, text: "" });
-  const [length, setLength] = useState("보통 (4천자)");
-  const [unit, setUnit] = useState("1회차씩");
-  const [rating, setRating] = useState<string>("all");
-  const [title, setTitle] = useState("");
+  const POV_NEEDS_CHAR = ["1인칭 관찰자", "3인칭 제한적"];
+  const [pov, setPov] = useState(() => {
+    const p = wizData.pov || "3인칭 전지적";
+    return p.includes(" · ") ? p.split(" · ")[0] : p;
+  });
+  const [povChar, setPovChar] = useState(() => {
+    const p = wizData.pov || "";
+    return p.includes(" · ") ? p.split(" · ")[1] : "";
+  });
+  const [count, setCount] = useState(() => {
+    const n = wizData.totalChapters;
+    if (!n) return { value: "30화", custom: false, text: "" };
+    const presetMap: Record<number, string> = { 1: "단편 (1화)", 10: "10화", 30: "30화" };
+    const preset = presetMap[n];
+    return preset ? { value: preset, custom: false, text: "" } : { value: "", custom: true, text: String(n) };
+  });
+  const [length, setLength] = useState(wizData.length || "보통 (4천자)");
+  const [unit, setUnit] = useState(wizData.unit || "1회차씩");
+  const [rating, setRating] = useState<string>(wizData.ageRating || "all");
+  const [title, setTitle] = useState(wizData.title || "");
   const [titleLoading, setTitleLoading] = useState(false);
   const [candidates, setCandidates] = useState<string[]>([]);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [tone, setTone] = useState("간결·속도감");
-  const [cover, setCover] = useState("웹툰풍");
-  const [keywords, setKeywords] = useState<string[]>(["회귀", "복수극"]);
+  const [tone, setTone] = useState(wizData.tone || "간결·속도감");
+  const [cover, setCover] = useState(wizData.coverStyle || "웹툰풍");
+  const [paraLen, setParaLen] = useState((wizData as { paragraphLength?: string }).paragraphLength || "중간");
+  const [keywords, setKeywords] = useState<string[]>(wizData.genres.length ? wizData.genres.slice(0, 3) : []);
   const [keywordText, setKeywordText] = useState("");
 
+  const needsChar = POV_NEEDS_CHAR.includes(pov);
+  const fullPov = needsChar && povChar ? `${pov} · ${povChar}` : pov;
   const countV = count.custom ? (count.text ? `${count.text}화` : "") : count.value;
+  const totalChaptersNum = parseInt(countV?.replace("화", "") ?? "1") || 1;
   const valid = !!pov && !!countV && !!length && !!unit && !!rating;
   const ratingLabel = RATING_DEFS.find((r) => r.k === rating)!.l;
 
-  const aiTitle = () => {
+  const handleGenerate = async () => {
+    if (!valid || submitting) return;
+    const outputData = { pov: fullPov, totalChapters: totalChaptersNum, length, title: title.trim() || "무제", ageRating: rating, tone, coverStyle: cover, unit, paragraphLength: paraLen };
+    saveOutput(outputData);
+    setSubmitting(true);
+    try {
+      const settings = { ...wizData, ...outputData };
+      if (editingNovelId) {
+        // 편집 모드 — 기존 작품 설정 업데이트
+        await updateNovel(editingNovelId, { title: outputData.title, settings });
+        clearEditMode();
+        navigate(`/works/${editingNovelId}`, { replace: true, state: { toast: "설정이 저장됐어요" } });
+      } else {
+        // 생성 모드 — 신규 작품 생성
+        const novel = await createNovel(outputData.title, settings);
+        setNovelId(novel.id);
+        navigate("/create/generating", { state: { novelId: novel.id } });
+      }
+    } catch (e: unknown) {
+      alert((e instanceof Error ? e.message : "작품 생성 중 오류가 발생했어요. 다시 시도해주세요."));
+      setSubmitting(false);
+    }
+  };
+
+  const aiTitle = async () => {
     setTitleLoading(true);
-    titleT.current = window.setTimeout(() => { setCandidates(AI_TITLES); setTitleLoading(false); }, 1200);
+    try {
+      const res = await suggestTitle({
+        era: wizData.era,
+        genres: wizData.genres,
+        goal: wizData.goal,
+        conflict: wizData.conflict,
+        characters: wizData.characters,
+        pov: fullPov,
+        ending: wizData.ending,
+      });
+      setCandidates(res.titles);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "제목 추천 실패");
+    } finally {
+      setTitleLoading(false);
+    }
   };
   const addKeyword = () => {
     const t = keywordText.trim();
@@ -50,12 +116,19 @@ export default function COutputWizard() {
     setKeywordText("");
   };
 
+  const protagonist = wizData.characters.find((c) => c.role === "protagonist");
+  const charSummary = wizData.characters.length === 0
+    ? "미입력"
+    : protagonist
+      ? `${protagonist.name}(주인공)${wizData.characters.length > 1 ? ` 외 ${wizData.characters.length - 1}명` : ""}`
+      : `${wizData.characters.length}명`;
+
   const summaryRows: { label: string; value: string; tone?: "muted" | "brand" | "error" }[] = [
-    { label: "배경 시대", value: PREV.era },
-    { label: "장르", value: PREV.genres },
-    { label: "등장인물", value: PREV.chars },
-    { label: "목표 · 결말", value: `${PREV.goal} · ${PREV.ending}` },
-    { label: "시점", value: pov },
+    { label: "배경 시대", value: wizData.era || "미입력", tone: wizData.era ? undefined : "muted" },
+    { label: "장르", value: wizData.genres.length ? wizData.genres.join(" · ") : "미입력", tone: wizData.genres.length ? undefined : "muted" },
+    { label: "등장인물", value: charSummary, tone: wizData.characters.length === 0 ? "muted" : undefined },
+    { label: "목표 · 결말", value: wizData.goal && wizData.ending ? `${wizData.goal} · ${wizData.ending}` : wizData.goal || wizData.ending || "미입력", tone: wizData.goal ? undefined : "muted" },
+    { label: "시점", value: fullPov },
     { label: "회차", value: `${countV || "미정"} · ${length}`, tone: countV ? undefined : "muted" },
     { label: "생성 단위", value: unit },
     { label: "연령 등급", value: ratingLabel, tone: rating === "19" ? "error" : undefined },
@@ -70,15 +143,46 @@ export default function COutputWizard() {
         <div className="min-w-0 flex-1">
           <div className="mb-5">
             <div className="text-2xl font-bold tracking-[-0.4px] text-ink">출력 설정</div>
-            <div className="mt-1 text-sm text-muted">4단계 · 마지막이에요. 출력 형식을 확정하면 1회차를 생성해요.</div>
+            <div className="mt-1 text-sm text-muted">
+              {editingNovelId
+                ? "5단계 · 마지막이에요. 변경된 설정을 저장하면 다음 회차부터 반영돼요."
+                : "5단계 · 마지막이에요. 출력 형식을 확정하면 1회차를 생성해요."}
+            </div>
           </div>
 
           {/* 시점 */}
           <div className="pw-card mb-4 p-6">
             <Label required>화자 시점 (POV)</Label>
             <div className="mt-3 flex flex-wrap gap-2">
-              {POV_OPTS.map((v) => <RadioPill key={v} selected={pov === v} onClick={() => setPov(v)}>{v}</RadioPill>)}
+              {POV_OPTS.map((v) => (
+                <RadioPill key={v} selected={pov === v} onClick={() => { setPov(v); if (!POV_NEEDS_CHAR.includes(v)) setPovChar(""); }}>
+                  {v}
+                </RadioPill>
+              ))}
             </div>
+
+            {needsChar && (
+              <div className="mt-4 border-t border-hairline pt-4" style={{ animation: "pw-fill .2s ease" }}>
+                <div className="mb-[10px] text-[13px] font-bold text-ink2">
+                  {pov === "1인칭 관찰자" ? "누구의 눈으로 서술할까요?" : "시점을 제한할 인물을 선택하세요"}
+                </div>
+                {wizData.characters.length === 0 ? (
+                  <div className="text-[13px] text-muted">② 인물 설정 단계에서 인물을 추가하면 여기서 선택할 수 있어요.</div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {wizData.characters.map((c) => (
+                      <RadioPill key={c.name} selected={povChar === c.name} onClick={() => setPovChar(c.name)}>
+                        {c.name}
+                        {c.role === "protagonist" && <span className="ml-1 text-[11px] text-brand/70">주인공</span>}
+                      </RadioPill>
+                    ))}
+                  </div>
+                )}
+                {needsChar && !povChar && wizData.characters.length > 0 && (
+                  <div className="mt-2 text-[12px] text-muted">인물을 선택하지 않으면 주인공 기준으로 생성돼요.</div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* 회차 설정 */}
@@ -195,6 +299,23 @@ export default function COutputWizard() {
                     </div>
                   </div>
                 </div>
+                {/* 문단 길이 */}
+                <div className="mt-3.5">
+                  <div className="mb-2 pw-field-label">문단 평균 길이</div>
+                  <div className="flex gap-2">
+                    {PARA_OPTS.map((o) => (
+                      <button
+                        key={o.v}
+                        onClick={() => setParaLen(o.v)}
+                        className={"flex flex-1 flex-col items-center gap-0.5 rounded-lg border py-3 text-center transition " + (paraLen === o.v ? "border-brand bg-wash text-brand" : "border-hairline bg-white text-ink2 hover:border-brand/40")}
+                      >
+                        <span className="text-[13px] font-bold">{o.l}</span>
+                        <span className="text-[11px] leading-[1.4]" style={{ color: paraLen === o.v ? "var(--color-brand)" : "#b4b4b4" }}>{o.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="mt-3.5">
                   <div className="mb-2 pw-field-label">키워드·클리셰</div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -217,7 +338,7 @@ export default function COutputWizard() {
               <button onClick={() => navigate("/create/relations")} className="h-14 rounded border border-line2 bg-white px-[22px] text-base font-bold text-ink2 transition hover:border-wash-2 hover:bg-wash hover:text-brand">← 이전: 관계도</button>
               <div className="flex items-center gap-3.5">
                 {!valid && <span className="text-[13px] font-bold text-muted">필수 항목(*)을 채우면 생성할 수 있어요.</span>}
-                <button disabled={!valid} onClick={() => navigate("/create/generating")} className={(valid ? "pw-btn-primary shadow-cta" : "pw-btn-disabled") + " h-14 gap-2 px-[30px] text-lg"}>✦ 1회차 생성하기</button>
+                <button disabled={!valid || submitting} onClick={handleGenerate} className={(valid && !submitting ? "pw-btn-primary shadow-cta" : "pw-btn-disabled") + " h-14 gap-2 px-[30px] text-lg"}>{submitting ? (editingNovelId ? "저장 중..." : "작품 만드는 중...") : (editingNovelId ? "✦ 설정 저장하기" : "✦ 1회차 생성하기")}</button>
               </div>
             </div>
           )}
@@ -252,7 +373,7 @@ export default function COutputWizard() {
           {!valid && <div className="mb-2 text-center text-xs font-bold text-muted">필수 항목(*)을 채워주세요</div>}
           <div className="flex gap-2.5">
             <button onClick={() => navigate("/create/relations")} className="h-[54px] flex-shrink-0 rounded border border-line2 bg-white px-[18px] text-[15px] font-bold text-ink2">← 이전</button>
-            <button disabled={!valid} onClick={() => navigate("/create/generating")} className={(valid ? "pw-btn-primary" : "pw-btn-disabled") + " h-[54px] flex-1 text-base"}>✦ 1회차 생성하기</button>
+            <button disabled={!valid || submitting} onClick={handleGenerate} className={(valid && !submitting ? "pw-btn-primary" : "pw-btn-disabled") + " h-[54px] flex-1 text-base"}>{submitting ? (editingNovelId ? "저장 중..." : "작품 만드는 중...") : (editingNovelId ? "✦ 설정 저장하기" : "✦ 1회차 생성하기")}</button>
           </div>
         </div>
       )}

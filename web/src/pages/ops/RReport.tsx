@@ -28,7 +28,6 @@ const REPORTS: { target: string; reason: string; date: string; status: Status; r
 export default function RReport() {
   const { showToast } = useToast();
   const navigate = useNavigate();
-  const [empty, setEmpty] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [reason, setReason] = useState<string | null>(null);
   const [detail, setDetail] = useState("");
@@ -49,43 +48,30 @@ export default function RReport() {
 
       <div className="mx-auto px-5 pb-20 pt-7" style={{ maxWidth: 680 }}>
         <div className="mb-[18px] flex items-center justify-between gap-3">
-          <div className="text-sm text-muted">총 {empty ? 0 : REPORTS.length}건의 신고</div>
+          <div className="text-sm text-muted">총 {REPORTS.length}건의 신고</div>
           <button onClick={openReport} className="h-[42px] rounded border-none bg-brand px-4 text-sm font-bold text-white transition hover:bg-brand-hover">+ 신고하기</button>
         </div>
 
-        {empty ? (
-          <div className="rounded-xl border border-hairline bg-white px-6 py-14 text-center" style={{ animation: "pw-fade .3s ease" }}>
-            <div className="text-base font-bold text-ink2">접수한 신고가 없어요</div>
-            <div className="mt-1.5 text-sm leading-[1.5] text-muted">유해하거나 권리를 침해하는 콘텐츠를 발견하면 신고해 주세요.</div>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3">
-            {REPORTS.map((r, i) => {
-              const st = STATUS_MAP[r.status];
-              return (
-                <div key={i} className="rounded-xl border border-hairline bg-white p-[18px]">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="truncate text-[15px] font-bold text-ink">{r.target}</div>
-                      <div className="mt-1 text-[13px] text-muted">사유: {r.reason} · {r.date}</div>
-                    </div>
-                    <span className={"flex-shrink-0 rounded-full px-3 py-[5px] text-xs font-bold " + st.cls}>{st.label}</span>
+        <div className="flex flex-col gap-3">
+          {REPORTS.map((r, i) => {
+            const st = STATUS_MAP[r.status];
+            return (
+              <div key={i} className="rounded-xl border border-hairline bg-white p-[18px]">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-[15px] font-bold text-ink">{r.target}</div>
+                    <div className="mt-1 text-[13px] text-muted">사유: {r.reason} · {r.date}</div>
                   </div>
-                  {r.result && (
-                    <div className="mt-3 rounded-lg bg-canvas px-3.5 py-3 text-[13px] leading-[1.5] text-ink2">
-                      <span className="font-bold text-ink">처리 결과 · </span>{r.result}
-                    </div>
-                  )}
+                  <span className={"flex-shrink-0 rounded-full px-3 py-[5px] text-xs font-bold " + st.cls}>{st.label}</span>
                 </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* demo toggle */}
-        <div className="mt-7 flex justify-center gap-2">
-          <DemoSeg active={!empty} onClick={() => setEmpty(false)}>내역 있음</DemoSeg>
-          <DemoSeg active={empty} onClick={() => setEmpty(true)}>빈 내역</DemoSeg>
+                {r.result && (
+                  <div className="mt-3 rounded-lg bg-canvas px-3.5 py-3 text-[13px] leading-[1.5] text-ink2">
+                    <span className="font-bold text-ink">처리 결과 · </span>{r.result}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -140,19 +126,11 @@ export default function RReport() {
             <div className="mx-auto flex h-[60px] w-[60px] items-center justify-center rounded-full bg-wash text-[28px] font-bold text-brand">✓</div>
             <div className="mt-4 text-[19px] font-bold text-ink">신고가 접수됐어요</div>
             <div className="mt-2 text-sm leading-[1.6] text-muted">검토 후 처리 결과를 알림으로 알려드려요. 신고해 주셔서 감사합니다.</div>
-            <button onClick={() => { setSuccessOpen(false); setEmpty(false); showToast("신고 내역에 추가됐어요"); }} className="mt-[22px] h-[50px] w-full rounded border-none bg-brand text-[15px] font-bold text-white">확인</button>
+            <button onClick={() => { setSuccessOpen(false); showToast("신고 내역에 추가됐어요"); }} className="mt-[22px] h-[50px] w-full rounded border-none bg-brand text-[15px] font-bold text-white">확인</button>
           </div>
         </div>
       )}
 
     </div>
-  );
-}
-
-function DemoSeg({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button onClick={onClick} className={"rounded-full border px-3.5 py-2 text-[13px] font-bold transition " + (active ? "border-brand bg-brand text-white" : "border-line2 bg-white text-muted")}>
-      {children}
-    </button>
   );
 }

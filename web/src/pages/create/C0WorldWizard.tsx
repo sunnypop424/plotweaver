@@ -4,9 +4,19 @@ import { HybridSelect } from "@/components/HybridSelect";
 import { useToast } from "@/components/Toast";
 import { useViewport } from "@/lib/useViewport";
 import { useCanvasDrag } from "@/lib/useCanvasDrag";
+import { useWizard } from "@/providers/WizardProvider";
+import { suggestWorld } from "@/lib/api";
 
 /* ── 옵션 / 장르 적응형 키트 ─────────────────────────────────────────── */
 const ERA_OPTIONS = ["동양 무협", "중세 유럽", "조선시대", "현대 도시", "근미래 SF", "이세계 판타지"];
+const ERA_DEFAULT_GENRES: Record<string, string[]> = {
+  "동양 무협": ["무협", "회귀", "복수"],
+  "중세 유럽": ["기사", "로맨스판타지", "악역영애"],
+  "조선시대": ["사극", "빙의", "궁중"],
+  "현대 도시": ["현대", "오피스", "로맨스"],
+  "근미래 SF": ["SF", "헌터", "디스토피아"],
+  "이세계 판타지": ["이세계", "로맨스판타지", "회귀"],
+};
 const GENRE_PRESET = ["환생", "빙의", "로맨스판타지", "헌터", "대체역사", "퓨전"];
 const PALETTE = ["#816bff", "#2a6fdb", "#1f8a5b", "#d9822b", "#c0504e", "#242537"];
 const REL_OPTIONS = ["교역로", "국경", "동맹", "적대", "종속", "교류"];
@@ -31,143 +41,61 @@ type Term = { id: number; term: string; category: string; categoryCustom: boolea
 type Region = { id: number; name: string; factionId: number | ""; desc: string; x: number; y: number };
 type MapEdge = { id: number; from: number; to: number; label: string; labelCustom: boolean; desc: string };
 
-/* ── 장르별 AI 자동 생성 샘플 (지위는 세로 등급 × 가로 세부로 구성) ───────── */
-type Sample = {
-  genres: string[];
-  factions: Omit<Faction, "id">[];
-  ranks: { name: string; desc: string; variants: string[] }[];
-  glossary: Omit<Term, "id">[];
-  worldRules: string;
-  taboos: string;
-};
-const SAMPLES: Record<string, Sample> = {
-  murim: {
-    genres: ["무협", "회귀", "복수"],
-    factions: [
-      { name: "화산파", color: "#2a6fdb", category: "정파", categoryCustom: false, leader: "장문인", parentId: "", desc: "정파 명문 검파" },
-      { name: "천마신교", color: "#c0504e", category: "마교", categoryCustom: false, leader: "교주", parentId: "", desc: "사파의 거대 종교 세력" },
-      { name: "황실", color: "#d9822b", category: "관(官)", categoryCustom: false, leader: "황제", parentId: "", desc: "대륙을 다스리는 조정" },
-    ],
-    ranks: [
-      { name: "장문인", desc: "문파의 수장", variants: ["장문인", "태상장로"] },
-      { name: "장로", desc: "원로 고수", variants: ["장로", "호법"] },
-      { name: "제자", desc: "문파의 제자", variants: ["일대제자", "이대제자", "삼대제자", "속가제자"] },
-    ],
-    glossary: [
-      { term: "한빙적수", category: "무공", categoryCustom: false, meaning: "극한의 냉기를 다루는 장법" },
-      { term: "자하신공", category: "무공", categoryCustom: false, meaning: "화산파 비전 내공심법" },
-      { term: "매화검법", category: "무공", categoryCustom: false, meaning: "화산파를 대표하는 검술" },
-      { term: "강호", category: "지명", categoryCustom: false, meaning: "무림인들이 살아가는 세계" },
-    ],
-    worldRules: "내공은 단전에 축적되며, 심법 없이는 운용할 수 없다.",
-    taboos: "마교 무공은 정파에 알려져선 안 된다.",
-  },
-  fantasy: {
-    genres: ["로맨스판타지", "빙의", "악역영애"],
-    factions: [
-      { name: "황가", color: "#d9822b", category: "왕국", categoryCustom: false, leader: "황제", parentId: "", desc: "제국을 다스리는 황실" },
-      { name: "아르세니아 공작가", color: "#2a6fdb", category: "공국·가문", categoryCustom: false, leader: "공작", parentId: "", desc: "검술 명문 대공가" },
-      { name: "마탑", color: "#816bff", category: "길드", categoryCustom: false, leader: "탑주", parentId: "", desc: "마법사들의 본거지" },
-      { name: "성기사단", color: "#1f8a5b", category: "기사단", categoryCustom: false, leader: "단장", parentId: "", desc: "신전을 수호하는 기사단" },
-    ],
-    ranks: [
-      { name: "황족", desc: "제국 최상위 혈통", variants: ["황제", "황후", "황태자", "황녀", "황자"] },
-      { name: "공작", desc: "최상위 귀족", variants: ["공작", "공작부인", "공작영애", "공작영식"] },
-      { name: "후작", desc: "", variants: ["후작", "후작부인", "후작영애", "후작영식"] },
-      { name: "백작", desc: "", variants: ["백작", "백작부인", "백작영애", "백작영식"] },
-      { name: "자작", desc: "", variants: ["자작", "자작부인", "자작영애"] },
-      { name: "남작", desc: "하위 귀족", variants: ["남작", "남작부인", "남작영애"] },
-    ],
-    glossary: [
-      { term: "마나", category: "마법", categoryCustom: false, meaning: "마법의 근원이 되는 힘" },
-      { term: "정령석", category: "아이템", categoryCustom: false, meaning: "정령의 힘이 깃든 보석" },
-      { term: "아카데미", category: "지명", categoryCustom: false, meaning: "귀족 자제가 다니는 학원" },
-      { term: "신성력", category: "마법", categoryCustom: false, meaning: "신전이 다루는 치유의 힘" },
-    ],
-    worldRules: "마나는 혈통으로 이어지며, 정령과 계약해야 고위 마법을 쓸 수 있다.",
-    taboos: "황족의 혈통에 의문을 제기하는 것은 대역죄로 다스린다.",
-  },
-  modern: {
-    genres: ["현대", "오피스", "로맨스"],
-    factions: [
-      { name: "태성그룹", color: "#2a6fdb", category: "기업", categoryCustom: false, leader: "회장", parentId: "", desc: "국내 최대 재벌" },
-      { name: "중앙지검", color: "#242537", category: "기관", categoryCustom: false, leader: "검사장", parentId: "", desc: "권력의 한 축인 검찰" },
-      { name: "강력반", color: "#c0504e", category: "조직", categoryCustom: false, leader: "반장", parentId: "", desc: "강력 사건 전담 수사반" },
-    ],
-    ranks: [
-      { name: "임원", desc: "경영진", variants: ["회장", "부회장", "대표이사", "전무", "상무"] },
-      { name: "부서장", desc: "중간 관리자", variants: ["본부장", "부장", "팀장"] },
-      { name: "실무", desc: "", variants: ["차장", "과장", "대리", "사원"] },
-    ],
-    glossary: [
-      { term: "태성그룹", category: "조직", categoryCustom: false, meaning: "국내 최대 재벌 기업" },
-      { term: "본관", category: "지명", categoryCustom: false, meaning: "태성그룹 사옥" },
-    ],
-    worldRules: "그룹의 주요 의사결정은 이사회를 거친다.",
-    taboos: "내부 정보를 외부에 유출하면 처벌받는다.",
-  },
-  generic: {
-    genres: [],
-    factions: [
-      { name: "동맹", color: "#816bff", category: "세력", categoryCustom: false, leader: "대표", parentId: "", desc: "" },
-      { name: "반대 세력", color: "#c0504e", category: "조직", categoryCustom: false, leader: "지도자", parentId: "", desc: "" },
-    ],
-    ranks: [
-      { name: "지도부", desc: "", variants: ["수장", "부수장"] },
-      { name: "간부", desc: "", variants: ["간부"] },
-      { name: "구성원", desc: "", variants: ["정예", "일반"] },
-    ],
-    glossary: [{ term: "중앙", category: "지명", categoryCustom: false, meaning: "세력의 중심지" }],
-    worldRules: "",
-    taboos: "",
-  },
-};
 
 export default function C0WorldWizard() {
   const { isMobile, isDesktop } = useViewport();
   const { showToast } = useToast();
   const navigate = useNavigate();
+  const { saveWorld, hasDraft, restoreDraft, discardDraft, data: wizData } = useWizard();
+  const isEditMode = !!wizData.editingNovelId;
 
-  const fid = useRef(3), rid = useRef(4), gid = useRef(4), regId = useRef(3), eid = useRef(1);
+  const maxId = (arr: { id: number }[]) => arr.length ? Math.max(...arr.map((x) => x.id)) : 0;
+  const fid   = useRef(maxId(wizData.worldFactionsData));
+  const rid   = useRef(maxId(wizData.worldRanksData));
+  const gid   = useRef(Object.keys(wizData.glossaryDict).length);
+  const regId = useRef(maxId(wizData.worldRegions));
+  const eid   = useRef(maxId(wizData.worldMapEdges));
   const aiTimer = useRef<number | undefined>(undefined);
   const mapTimer = useRef<number | undefined>(undefined);
 
   const [tab, setTab] = useState<"settings" | "map">("settings");
-  const [era, setEra] = useState({ value: "동양 무협", custom: false, text: "" });
-  const [genres, setGenres] = useState<string[]>(["무협", "회귀", "복수"]);
+  const [era, setEra] = useState(() => {
+    if (!wizData.era) return { value: "동양 무협", custom: false, text: "" };
+    return ERA_OPTIONS.includes(wizData.era)
+      ? { value: wizData.era, custom: false, text: "" }
+      : { value: "", custom: true, text: wizData.era };
+  });
+  const [genres, setGenres] = useState<string[]>(() => wizData.genres.length ? wizData.genres : []);
   const [genrePickerOpen, setGenrePickerOpen] = useState(false);
   const [genreCustomText, setGenreCustomText] = useState("");
 
-  const [factions, setFactions] = useState<Faction[]>([
-    { id: 1, name: "화산파", color: "#2a6fdb", category: "정파", categoryCustom: false, leader: "장문인", parentId: "", desc: "정파 명문 검파" },
-    { id: 2, name: "천마신교", color: "#c0504e", category: "마교", categoryCustom: false, leader: "교주", parentId: "", desc: "사파의 거대 종교 세력" },
-    { id: 3, name: "황실", color: "#d9822b", category: "관(官)", categoryCustom: false, leader: "황제", parentId: "", desc: "대륙을 다스리는 조정" },
-  ]);
-  const [ranks, setRanks] = useState<Rank[]>([
-    { id: 1, name: "장문인", desc: "문파의 수장", variants: ["장문인", "태상장로"] },
-    { id: 2, name: "장로", desc: "원로 고수", variants: ["장로", "호법"] },
-    { id: 3, name: "제자", desc: "문파의 제자", variants: ["일대제자", "이대제자", "삼대제자", "속가제자"] },
-  ]);
-  const [glossary, setGlossary] = useState<Term[]>([
-    { id: 1, term: "한빙적수", category: "무공", categoryCustom: false, meaning: "극한의 냉기를 다루는 장법" },
-    { id: 2, term: "자하신공", category: "무공", categoryCustom: false, meaning: "화산파 비전 내공심법" },
-    { id: 3, term: "매화검법", category: "무공", categoryCustom: false, meaning: "화산파를 대표하는 검술" },
-    { id: 4, term: "강호", category: "지명", categoryCustom: false, meaning: "무림인들이 살아가는 세계" },
-  ]);
-  const [worldRules, setWorldRules] = useState("내공은 단전에 축적되며, 심법 없이는 운용할 수 없다.");
-  const [taboos, setTaboos] = useState("마교 무공은 정파에 알려져선 안 된다.");
+  const [factions, setFactions] = useState<Faction[]>(() => (wizData.worldFactionsData as Faction[]) ?? []);
+  const [ranks, setRanks] = useState<Rank[]>(() => (wizData.worldRanksData as Rank[]) ?? []);
+  const [glossary, setGlossary] = useState<Term[]>(() => {
+    const entries = Object.entries(wizData.glossaryDict);
+    if (entries.length) return entries.map(([term, meaning], i) => ({ id: i + 1, term, category: "기타", categoryCustom: false, meaning }));
+    return [];
+  });
+  const [worldRules, setWorldRules] = useState(wizData.worldRules || "");
+  const [taboos, setTaboos] = useState(wizData.constraints || "");
 
-  const [regions, setRegions] = useState<Region[]>([
-    { id: 1, name: "화산", factionId: 1, desc: "화산파의 본산", x: 190, y: 150 },
-    { id: 2, name: "흑풍곡", factionId: 2, desc: "천마신교의 거점", x: 200, y: 360 },
-    { id: 3, name: "황도", factionId: 3, desc: "황실이 자리한 수도", x: 470, y: 250 },
-  ]);
-  const [mapEdges, setMapEdges] = useState<MapEdge[]>([{ id: 1, from: 1, to: 3, label: "관도(官道)", labelCustom: true, desc: "" }]);
+  const [regions, setRegions] = useState<Region[]>(() => (wizData.worldRegions as Region[]) ?? []);
+  const [mapEdges, setMapEdges] = useState<MapEdge[]>(() => (wizData.worldMapEdges as MapEdge[]) ?? []);
   const [selectedRegionId, setSelectedRegionId] = useState<number | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<number | null>(null);
 
   const [aiLoading, setAiLoading] = useState(false);
   const [mapAutoLoading, setMapAutoLoading] = useState(false);
+
+  const [powerSystem, setPowerSystem] = useState(() => ({
+    enabled: wizData.powerSystem?.enabled ?? false,
+    rankNames: wizData.powerSystem?.rankNames ?? "",
+    coreRule: wizData.powerSystem?.coreRule ?? "",
+    protagonistRank: wizData.powerSystem?.protagonistRank ?? "",
+    protagonistGoal: wizData.powerSystem?.protagonistGoal ?? "",
+    limitation: wizData.powerSystem?.limitation ?? "",
+  }));
+  const patchPS = (patch: Partial<typeof powerSystem>) => setPowerSystem((s) => ({ ...s, ...patch }));
 
   const eraVal = era.custom ? era.text.trim() : era.value;
   const kit = KITS[kitFor(eraVal)];
@@ -265,39 +193,94 @@ export default function C0WorldWizard() {
   };
 
   /* ── AI 자동 채움 ───────────────────────────────────────────────────── */
-  const aiAutofill = () => {
+  const aiAutofill = async () => {
     setAiLoading(true); setGenrePickerOpen(false);
-    aiTimer.current = window.setTimeout(() => {
-      const s = SAMPLES[kitFor(eraVal)]; // 선택한 시대(장르)에 맞춘 세계관 초안
-      setFactions(s.factions.map((f) => ({ ...f, id: ++fid.current })));
-      setRanks(s.ranks.map((r) => ({ ...r, id: ++rid.current })));
-      setGlossary(s.glossary.map((t) => ({ ...t, id: ++gid.current })));
-      setWorldRules(s.worldRules);
-      setTaboos(s.taboos);
-      if (genres.length === 0 && s.genres.length) setGenres(s.genres);
-      setAiLoading(false);
+    const synopsis = wizData.goal || "";
+    try {
+      const res = await suggestWorld({ era: eraVal, genres, synopsis, worldRules, factionCats: kit.factionCats });
+      const rawFactions = res.factions.map((f) => ({ ...f, id: ++fid.current }));
+      // parentIndex → 실제 ID로 매핑
+      const newFactions = rawFactions.map((f, i) => ({
+        ...f,
+        parentId: res.factions[i].parentIndex >= 0 && rawFactions[res.factions[i].parentIndex]
+          ? String(rawFactions[res.factions[i].parentIndex].id)
+          : "",
+      }));
+      setFactions(newFactions);
+      setRanks(res.ranks.map((r) => ({ ...r, id: ++rid.current })));
+      setGlossary(res.glossary.map((t) => ({ ...t, id: ++gid.current })));
+      setWorldRules(res.worldRules);
+      setTaboos(res.taboos);
+      // 월드맵 지역도 함께 생성
+      if (res.regions?.length) {
+        const newRegions = res.regions.map((r) => ({
+          id: ++regId.current,
+          name: r.name,
+          factionId: (r.factionIndex >= 0 && newFactions[r.factionIndex] ? newFactions[r.factionIndex].id : "") as number | "",
+          desc: r.desc,
+          x: r.x,
+          y: r.y,
+        }));
+        setRegions(newRegions);
+        if (res.mapEdges?.length) {
+          setMapEdges(res.mapEdges.map((e) => ({
+            id: ++eid.current,
+            from: newRegions[e.fromIndex]?.id ?? newRegions[0].id,
+            to: newRegions[e.toIndex]?.id ?? newRegions[1].id,
+            label: e.label,
+            labelCustom: true,
+            desc: e.desc,
+          })));
+        }
+      }
       showToast("AI가 세계관 초안을 채웠어요");
-    }, 1400);
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : "AI 생성 실패");
+    } finally {
+      setAiLoading(false);
+    }
   };
 
-  const mapAutoRecommend = () => {
+  const mapAutoRecommend = async () => {
     setMapAutoLoading(true);
-    mapTimer.current = window.setTimeout(() => {
-      const fs = factions;
-      const r1 = ++regId.current, r2 = ++regId.current, r3 = ++regId.current;
-      setRegions([
-        { id: r1, name: "화산", factionId: fs[0] ? fs[0].id : "", desc: "화산파의 본산", x: 190, y: 150 },
-        { id: r2, name: "흑풍곡", factionId: fs[1] ? fs[1].id : "", desc: "천마신교의 거점", x: 200, y: 360 },
-        { id: r3, name: "황도", factionId: fs[2] ? fs[2].id : "", desc: "황실이 자리한 수도", x: 470, y: 250 },
-      ]);
-      setMapEdges([
-        { id: ++eid.current, from: r1, to: r3, label: "관도(官道)", labelCustom: true, desc: "" },
-        { id: ++eid.current, from: r2, to: r3, label: "국경", labelCustom: false, desc: "" },
-      ]);
-      clearMapSel();
-      setMapAutoLoading(false);
+    try {
+      const res = await suggestWorld({ era: eraVal, genres, synopsis: wizData.goal || "", worldRules, factionCats: kit.factionCats });
+      const rawFacs = factions.length ? factions : res.factions.map((f) => ({ ...f, id: ++fid.current }));
+      const newFactions = factions.length ? rawFacs : rawFacs.map((f, i) => ({
+        ...f,
+        parentId: res.factions[i]?.parentIndex >= 0 && rawFacs[res.factions[i].parentIndex]
+          ? String(rawFacs[res.factions[i].parentIndex].id)
+          : "",
+      }));
+      if (!factions.length) setFactions(newFactions);
+      if (res.regions?.length) {
+        const newRegions = res.regions.map((r) => ({
+          id: ++regId.current,
+          name: r.name,
+          factionId: (r.factionIndex >= 0 && newFactions[r.factionIndex] ? newFactions[r.factionIndex].id : "") as number | "",
+          desc: r.desc,
+          x: r.x,
+          y: r.y,
+        }));
+        setRegions(newRegions);
+        if (res.mapEdges?.length) {
+          setMapEdges(res.mapEdges.map((e) => ({
+            id: ++eid.current,
+            from: newRegions[e.fromIndex]?.id ?? newRegions[0].id,
+            to: newRegions[e.toIndex]?.id ?? newRegions[1]?.id ?? newRegions[0].id,
+            label: e.label,
+            labelCustom: true,
+            desc: e.desc,
+          })));
+        }
+        clearMapSel();
+      }
       showToast("AI가 지도 초안을 추천했어요");
-    }, 1300);
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : "AI 생성 실패");
+    } finally {
+      setMapAutoLoading(false);
+    }
   };
 
   /* ── 파생 계산 ──────────────────────────────────────────────────────── */
@@ -315,6 +298,25 @@ export default function C0WorldWizard() {
 
   return (
     <>
+
+      {/* 편집 모드 배너 */}
+      {isEditMode && (
+        <div className="sticky top-0 z-30 flex items-center gap-2.5 border-b border-[#ffe4b8] bg-[#fff8ee] px-5 py-3">
+          <span className="rounded-full bg-[#fff3e0] px-2 py-0.5 text-[11px] font-bold text-[#d9822b]">편집 중</span>
+          <span className="text-sm font-bold text-[#9a5000]">기존 작품의 설정을 편집하고 있어요. 세계관 시각 맵은 재설정이 필요해요.</span>
+        </div>
+      )}
+
+      {/* 임시저장 복구 배너 */}
+      {!isEditMode && hasDraft && (
+        <div className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-[#e3dfff] bg-[#f5f3ff] px-5 py-3">
+          <span className="text-sm font-bold text-brand">이전에 작성 중이던 내용이 있어요. 이어서 할까요?</span>
+          <div className="flex gap-2">
+            <button onClick={discardDraft} className="h-8 rounded px-3.5 text-[13px] font-bold text-muted hover:text-ink">버리기</button>
+            <button onClick={() => { restoreDraft(); showToast("임시저장된 내용을 불러왔어요"); }} className="h-8 rounded bg-brand px-4 text-[13px] font-bold text-white hover:bg-brand-hover">불러오기</button>
+          </div>
+        </div>
+      )}
 
       <div className="mx-auto box-border w-full" style={isDesktop ? { maxWidth: 1120, padding: "32px 24px 56px" } : { maxWidth: 680, padding: "24px 16px 132px" }}>
         {/* heading */}
@@ -360,7 +362,7 @@ export default function C0WorldWizard() {
                 <div className="pw-card mb-4 p-6">
                   <div className="mb-4 text-sm font-bold text-ink">기반</div>
                   <div className="mb-[22px]">
-                    <HybridSelect label="배경 시대" required custom={era.custom} onToggleCustom={() => setEra((s) => ({ ...s, custom: !s.custom }))} value={era.custom ? era.text : era.value} onChange={(v) => setEra((s) => (s.custom ? { ...s, text: v } : { ...s, value: v }))} customPlaceholder="배경 시대를 직접 입력하세요" height={48}>
+                    <HybridSelect label="배경 시대" required custom={era.custom} onToggleCustom={() => { setEra((s) => ({ ...s, custom: !s.custom })); setGenres([]); }} value={era.custom ? era.text : era.value} onChange={(v) => { setEra((s) => (s.custom ? { ...s, text: v } : { ...s, value: v })); if (!era.custom) setGenres(ERA_DEFAULT_GENRES[v] ?? []); }} customPlaceholder="배경 시대를 직접 입력하세요" height={48}>
                       {ERA_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
                     </HybridSelect>
                   </div>
@@ -568,6 +570,72 @@ export default function C0WorldWizard() {
                     </div>
                   </div>
                 </div>
+
+                {/* 능력 · 파워 시스템 */}
+                <div className="pw-card mb-4 p-6">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <div className="text-sm font-bold text-ink">능력 · 파워 시스템</div>
+                    <button
+                      type="button"
+                      onClick={() => patchPS({ enabled: !powerSystem.enabled })}
+                      className={"relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 " + (powerSystem.enabled ? "bg-brand" : "bg-[#d1d5db]")}
+                    >
+                      <span className={"pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 " + (powerSystem.enabled ? "translate-x-5" : "translate-x-0")} />
+                    </button>
+                  </div>
+                  <div className="mb-4 text-[13px] text-muted">이 세계의 능력·마법·무공 체계를 정의해요. 등급·규칙이 프롬프트에 반영돼요.</div>
+                  {powerSystem.enabled && (
+                    <div className="space-y-4">
+                      <div>
+                        <div className="mb-1.5 pw-field-label">등급 체계 <span className="font-normal text-muted">(강→약 순, 쉼표 구분)</span></div>
+                        <input
+                          value={powerSystem.rankNames}
+                          onChange={(e) => patchPS({ rankNames: e.target.value })}
+                          placeholder="예: S,A,B,C,D,E — 또는: 신급,성급,지급,현급,황급"
+                          className="pw-input text-[15px]"
+                        />
+                      </div>
+                      <div>
+                        <div className="mb-1.5 pw-field-label">핵심 규칙</div>
+                        <textarea
+                          value={powerSystem.coreRule}
+                          onChange={(e) => patchPS({ coreRule: e.target.value })}
+                          placeholder="예: 마나는 감정에 반응한다. 공포를 느낄수록 마력이 폭주한다."
+                          className="min-h-[72px] w-full resize-y rounded border border-hairline bg-white px-3.5 py-3 text-[15px] leading-[1.6] text-ink outline-none transition focus:border-brand focus:shadow-focus"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <div className="mb-1.5 pw-field-label">주인공 현재 등급</div>
+                          <input
+                            value={powerSystem.protagonistRank}
+                            onChange={(e) => patchPS({ protagonistRank: e.target.value })}
+                            placeholder="예: E등급"
+                            className="pw-input text-[15px]"
+                          />
+                        </div>
+                        <div>
+                          <div className="mb-1.5 pw-field-label">목표 등급</div>
+                          <input
+                            value={powerSystem.protagonistGoal}
+                            onChange={(e) => patchPS({ protagonistGoal: e.target.value })}
+                            placeholder="예: S등급"
+                            className="pw-input text-[15px]"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <div className="mb-1.5 pw-field-label">한계 · 부작용</div>
+                        <input
+                          value={powerSystem.limitation}
+                          onChange={(e) => patchPS({ limitation: e.target.value })}
+                          placeholder="예: 상위 마법 사용 시 수명이 소모된다"
+                          className="pw-input text-[15px]"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -678,7 +746,7 @@ export default function C0WorldWizard() {
             {!isMobile && (
               <div className="mt-5 flex items-center justify-between gap-3.5">
                 <button onClick={() => navigate("/create")} className="h-14 rounded px-[22px] text-base font-bold text-muted transition hover:bg-wash hover:text-brand">건너뛰기</button>
-                <button onClick={() => navigate("/create")} className="pw-btn-primary h-14 px-7 text-lg">다음: 기본설정 →</button>
+                <button onClick={() => { saveWorld({ era: eraVal, genres, worldRules, constraints: taboos, glossaryDict: Object.fromEntries(glossary.filter(t => t.term && t.meaning).map(t => [t.term, t.meaning])), worldFactions: factions.map(f => f.name).filter(Boolean), worldRanks: ranks.flatMap(r => [r.name, ...r.variants]).filter(Boolean), worldFactionsData: factions, worldRanksData: ranks, worldRegions: regions, worldMapEdges: mapEdges, powerSystem }); navigate("/create"); }} className="pw-btn-primary h-14 px-7 text-lg">다음: 기본설정 →</button>
               </div>
             )}
           </div>
@@ -812,7 +880,7 @@ export default function C0WorldWizard() {
       {isMobile && (
         <div className="fixed inset-x-0 bottom-0 z-30 flex items-center gap-2.5 border-t border-hairline bg-white px-4 py-3 shadow-[0_-2px_12px_rgba(0,0,0,0.04)]">
           <button onClick={() => navigate("/create")} className="h-[54px] flex-shrink-0 rounded border border-line2 bg-white px-[18px] text-[15px] font-bold text-muted">건너뛰기</button>
-          <button onClick={() => navigate("/create")} className="pw-btn-primary h-[54px] flex-1 text-base">다음: 기본설정 →</button>
+          <button onClick={() => { saveWorld({ era: eraVal, genres, worldRules, constraints: taboos, glossaryDict: Object.fromEntries(glossary.filter(t => t.term && t.meaning).map(t => [t.term, t.meaning])), worldFactions: factions.map(f => f.name).filter(Boolean), worldRanks: ranks.flatMap(r => [r.name, ...r.variants]).filter(Boolean), worldFactionsData: factions, worldRanksData: ranks, worldRegions: regions, worldMapEdges: mapEdges, powerSystem }); navigate("/create"); }} className="pw-btn-primary h-[54px] flex-1 text-base">다음: 기본설정 →</button>
         </div>
       )}
 

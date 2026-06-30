@@ -30,7 +30,7 @@ LENGTH_TARGETS = {"short": 2000, "normal": 4000, "long": 6000}
 RECENT_SUMMARY_WINDOW = 3
 
 # --- 출력 토큰 상한 (13 §7 '분량 가드' / 과생성 방지) ---------------------
-MAX_OUTPUT_TOKENS = 8000          # 본문
+MAX_OUTPUT_TOKENS = 16000         # 본문 (한국어 4천자 ≈ 6~10K 토큰)
 MAX_OUTPUT_TOKENS_AUX = 1500      # 요약·추출·감사
 
 # --- 프롬프트 캐싱 (13 §7) -----------------------------------------------

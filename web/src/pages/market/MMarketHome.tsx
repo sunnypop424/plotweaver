@@ -1,23 +1,11 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { WorkCard, type Badge } from "@/components/WorkCard";
 import { useToast } from "@/components/Toast";
 import { GlobalNav } from "@/components/GlobalNav";
+import { listNovels } from "@/lib/api";
 
-type Work = { title: string; author: string; rating: string; price: string; badge: Badge; variant: number };
-
-const WORKS: Work[] = [
-  { title: "회귀한 검사", author: "지훈", rating: "4.8", price: "3,000원", badge: "paid", variant: 0 },
-  { title: "악녀의 일기", author: "세라", rating: "4.6", price: "", badge: "free", variant: 2 },
-  { title: "현대 마법사", author: "도윤", rating: "4.7", price: "", badge: "tip", variant: 3 },
-  { title: "황혼의 기사단", author: "린", rating: "4.9", price: "4,500원", badge: "paid", variant: 1 },
-  { title: "폐허의 연금술사", author: "하루", rating: "4.5", price: "", badge: "free", variant: 4 },
-  { title: "서리의 군주", author: "강", rating: "4.8", price: "2,500원", badge: "paid", variant: 5 },
-  { title: "검은 탑의 연인", author: "유나", rating: "4.4", price: "", badge: "tip", variant: 6 },
-  { title: "별을 삼킨 아이", author: "소리", rating: "4.7", price: "3,500원", badge: "paid", variant: 7 },
-  { title: "붉은 달의 맹세", author: "한별", rating: "4.3", price: "", badge: "free", variant: 2 },
-  { title: "이세계 식당", author: "미오", rating: "4.9", price: "5,000원", badge: "paid", variant: 1 },
-];
+type Work = { id: string; title: string; author: string; rating: string; price: string; badge: Badge; variant: number };
 
 const FILTER_DEFS = [
   { key: "genre", label: "장르" },
@@ -25,12 +13,6 @@ const FILTER_DEFS = [
   { key: "price", label: "가격" },
 ] as const;
 type FilterKey = (typeof FILTER_DEFS)[number]["key"];
-
-const RAILS = [
-  { emoji: "🏆", title: "베스트셀러", idx: [0, 9, 3, 7, 5] },
-  { emoji: "✨", title: "취향 추천", idx: [2, 1, 6, 8, 4] },
-  { emoji: "🌱", title: "신작", idx: [8, 7, 6, 5, 0] },
-];
 
 type Mode = "browse" | "search";
 
@@ -44,13 +26,28 @@ export default function MMarketHome() {
   const [activeFilters, setActiveFilters] = useState<Partial<Record<FilterKey, boolean>>>({});
   const [mode, setMode] = useState<Mode>("browse");
   const [searchLoading, setSearchLoading] = useState(false);
-  const [forceEmpty, setForceEmpty] = useState(false);
+  const [works, setWorks] = useState<Work[]>([]);
+
+  useEffect(() => {
+    listNovels()
+      .then((ns) => setWorks(
+        ns.map((n, i) => ({
+          id: n.id,
+          title: n.title,
+          author: "",
+          rating: "",
+          price: n.status === "selling" ? "" : "",
+          badge: n.status === "selling" ? "paid" : "free" as Badge,
+          variant: i % 8,
+        }))
+      ))
+      .catch(() => {});
+  }, []);
 
   const onQuery = (q: string) => {
     setQuery(q);
     setMode(q.trim() ? "search" : "browse");
     setSearchLoading(!!q.trim());
-    setForceEmpty(false);
     window.clearTimeout(searchT.current);
     if (q.trim()) searchT.current = window.setTimeout(() => setSearchLoading(false), 900);
   };
@@ -60,10 +57,10 @@ export default function MMarketHome() {
   };
   const hasActiveChips = Object.values(activeFilters).some(Boolean);
 
-  const wc = (w: Work) => ({ ...w, onOpen: () => navigate("/market/1") });
-  const results = WORKS.filter((w) => w.title.includes(query.trim()));
-  const recommend = [0, 3, 7, 5, 9].map((i) => WORKS[i]);
-  const searchEmpty = mode === "search" && !searchLoading && (forceEmpty || results.length === 0);
+  const wc = (w: Work) => ({ ...w, onOpen: () => navigate(`/market/${w.id}`) });
+  const results = works.filter((w) => w.title.includes(query.trim()));
+  const recommend = works.slice(0, 5);
+  const searchEmpty = mode === "search" && !searchLoading && results.length === 0;
   const searchResults = mode === "search" && !searchLoading && !searchEmpty && results.length > 0;
 
   return (
@@ -136,36 +133,35 @@ export default function MMarketHome() {
           </div>
         ) : (
           <div>
-            {RAILS.map((rail) => (
-              <div key={rail.title} className="mb-9">
+            {works.length > 0 && (
+              <div className="mb-9">
                 <div className="mb-4 flex items-center justify-between">
                   <div className="flex items-center gap-2.5">
-                    <span className="text-lg">{rail.emoji}</span>
-                    <span className="text-xl font-bold tracking-[-0.4px] text-ink">{rail.title}</span>
+                    <span className="text-lg">🏆</span>
+                    <span className="text-xl font-bold tracking-[-0.4px] text-ink">전체 작품</span>
                   </div>
-                  <button onClick={() => showToast(`${rail.title} 전체보기`)} className="border-none bg-transparent px-1 py-1.5 text-[13px] font-bold text-muted transition-colors hover:text-brand">전체 ›</button>
                 </div>
                 <div className="pw-scroll flex gap-4 overflow-x-auto pb-2.5">
-                  {rail.idx.map((i) => (
-                    <WorkCard key={i} {...wc(WORKS[i])} className="w-[170px] flex-shrink-0" />
+                  {works.slice(0, 5).map((w) => (
+                    <WorkCard key={w.id} {...wc(w)} className="w-[170px] flex-shrink-0" />
                   ))}
                 </div>
               </div>
-            ))}
+            )}
 
             <div className="mt-2">
-              <div className="mb-4 text-xl font-bold tracking-[-0.4px] text-ink">전체 작품</div>
-              <Grid works={WORKS.map(wc)} />
+              <div className="mb-4 text-xl font-bold tracking-[-0.4px] text-ink">전체 작품 ({works.length})</div>
+              {works.length === 0 ? (
+                <div className="rounded-xl border border-hairline bg-white px-6 py-12 text-center">
+                  <div className="text-base font-bold text-ink2">아직 출판된 작품이 없어요</div>
+                  <div className="mt-1.5 text-sm text-muted">첫 번째 작가가 되어 보세요!</div>
+                </div>
+              ) : (
+                <Grid works={works.map(wc)} />
+              )}
             </div>
           </div>
         )}
-      </div>
-
-      {/* demo switcher */}
-      <div className="fixed bottom-4 right-4 z-40 flex gap-1 rounded-full border border-hairline bg-white p-1 shadow-[0_2px_12px_rgba(0,0,0,0.1)]">
-        <DemoSeg active={mode === "browse"} onClick={() => { setMode("browse"); setQuery(""); setSearchLoading(false); setForceEmpty(false); }}>탐색</DemoSeg>
-        <DemoSeg active={mode === "search" && !forceEmpty} onClick={() => { setMode("search"); setQuery("회귀"); setSearchLoading(false); setForceEmpty(false); }}>검색결과</DemoSeg>
-        <DemoSeg active={forceEmpty} onClick={() => { setMode("search"); setQuery("존재하지않는작품"); setSearchLoading(false); setForceEmpty(true); }}>0건</DemoSeg>
       </div>
 
     </div>
@@ -180,10 +176,3 @@ function Grid({ works }: { works: (Work & { onOpen: () => void })[] }) {
   );
 }
 
-function DemoSeg({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button onClick={onClick} className={"rounded-full px-[11px] py-[7px] text-xs font-bold transition " + (active ? "bg-brand text-white" : "bg-transparent text-muted")}>
-      {children}
-    </button>
-  );
-}

@@ -1,78 +1,157 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { CoverTile } from "@/components/CoverTile";
 import { useToast } from "@/components/Toast";
 import { useViewport } from "@/lib/useViewport";
+import { getNovel, listChapters, deleteNovel, type NovelSettings } from "@/lib/api";
+import { useWizard } from "@/providers/WizardProvider";
 
-type Status = "private" | "public" | "selling";
-type Grade = "user" | "assist" | "ai";
-type CState = "edited" | "generated" | "generating";
-
-const STATUS_MAP: Record<Status, { label: string; cls: string }> = {
+const STATUS_META = {
+  draft: { label: "비공개", cls: "bg-[#f2f2f2] text-ink2" },
   private: { label: "비공개", cls: "bg-[#f2f2f2] text-ink2" },
   public: { label: "무료 공개", cls: "bg-[#e8f5ee] text-[#2f8f5b]" },
   selling: { label: "판매중", cls: "bg-wash text-brand" },
-};
-const GRADE_MAP: Record<Grade, { label: string; cls: string }> = {
-  user: { label: "AI 보조", cls: "bg-wash text-brand" },
-  assist: { label: "AI 보조", cls: "bg-wash text-brand" },
-  ai: { label: "AI 생성", cls: "bg-error-wash text-error" },
-};
-const STATE_MAP: Record<CState, { label: string; cls: string }> = {
-  edited: { label: "편집됨", cls: "bg-[#e8f5ee] text-[#2f8f5b]" },
-  generated: { label: "생성됨", cls: "bg-[#f2f2f2] text-muted" },
-  generating: { label: "생성 중", cls: "bg-wash text-brand" },
-};
-
-const CHAPTERS: { num: number; title: string; length: string; grade: Grade; state: CState }[] = [
-  { num: 1, title: "1화. 회귀", length: "4,120자", grade: "user", state: "edited" },
-  { num: 2, title: "2화. 첫 번째 칼날", length: "3,980자", grade: "assist", state: "edited" },
-  { num: 3, title: "3화. 배신의 밤", length: "4,310자", grade: "assist", state: "generated" },
-  { num: 4, title: "4화. 옛 동료", length: "—", grade: "assist", state: "generating" },
-];
-const SETTING_CHIPS = [
-  { label: "시대", value: "중세 유럽" }, { label: "인물", value: "카엘 외 2명" },
-  { label: "목표", value: "복수" }, { label: "결말", value: "복수 완성" },
-];
-const STATS = [
-  { label: "조회", value: "12.4만", brand: false }, { label: "구매", value: "1,840", brand: false },
-  { label: "후원", value: "312", brand: false }, { label: "수익", value: "₩1.5M", brand: true },
-];
+} as const;
+type NStatus = keyof typeof STATUS_META;
 
 export default function DWorkDetail() {
   const { vw } = useViewport();
   const { showToast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { id: novelId } = useParams<{ id: string }>();
+  const { loadFromNovel } = useWizard();
   const isWide = vw >= 768;
 
-  const [status, setStatus] = useState<Status>("selling");
-  const [emptyMode, setEmptyMode] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [title, setTitle] = useState("");
+  const [status, setStatus] = useState<NStatus>("draft");
+  const [settings, setSettings] = useState<NovelSettings | null>(null);
+  const [coverUrl, setCoverUrl] = useState<string | null>(null);
+  const [chapters, setChapters] = useState<{ seq: number; content: string; created_at: string }[]>([]);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [confirm, setConfirm] = useState<null | "work" | string>(null);
+  const [confirm, setConfirm] = useState<null | "work">(null);
+  const [deleting, setDeleting] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const isPrivate = status === "private";
+  // 편집 완료 후 돌아왔을 때 toast 표시
+  useEffect(() => {
+    const s = location.state as { toast?: string } | null;
+    if (s?.toast) showToast(s.toast);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleEditSettings = () => {
+    if (!settings || !novelId) return;
+    loadFromNovel(novelId, settings);
+    navigate("/create/world");
+  };
+
+  useEffect(() => {
+    if (!novelId) return;
+    Promise.all([getNovel(novelId), listChapters(novelId)])
+      .then(([n, chs]) => {
+        setTitle(n.title);
+        setStatus((n.status as NStatus) ?? "draft");
+        setSettings(n.settings);
+        setCoverUrl(n.cover_url);
+        setChapters(chs.sort((a, b) => a.seq - b.seq));
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [novelId]);
+
+  const st = STATUS_META[status] ?? STATUS_META.draft;
   const isSelling = status === "selling";
-  const showStats = (status === "public" || status === "selling") && !emptyMode;
-  const st = STATUS_MAP[status];
+  const isPrivate = status === "draft" || status === "private";
+  const total = settings?.totalChapters ?? 0;
+  const done = chapters.length;
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
 
-  const total = 30;
-  const done = emptyMode ? 0 : 12;
-  const pct = Math.round((done / total) * 100);
+  const settingChips = [
+    settings?.era ? { label: "시대", value: settings.era } : null,
+    settings?.characters?.length
+      ? { label: "인물", value: settings.characters.length === 1 ? settings.characters[0].name : `${settings.characters[0].name} 외 ${settings.characters.length - 1}명` }
+      : null,
+    settings?.goal ? { label: "목표", value: settings.goal.slice(0, 16) } : null,
+    settings?.ending ? { label: "결말", value: settings.ending.slice(0, 16) } : null,
+  ].filter((c): c is { label: string; value: string } => c !== null);
 
   const more = (label: string) => () => { setMoreOpen(false); showToast(label); };
-  const confirmWork = confirm === "work";
+
+  const handleDeleteWork = async () => {
+    if (!novelId || deleting) return;
+    setDeleting(true);
+    try {
+      await deleteNovel(novelId);
+      navigate("/library");
+    } catch {
+      showToast("삭제에 실패했어요");
+      setDeleting(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-canvas">
+        {/* 상단 바 스켈레톤 */}
+        <div className="sticky top-0 z-30 flex h-[60px] items-center justify-between border-b border-hairline bg-white px-5">
+          <div className="pw-skel h-4 w-16 rounded" />
+          <div className="pw-skel h-4 w-36 rounded" />
+          <div className="flex gap-2">
+            <div className="pw-skel h-9 w-20 rounded" />
+            <div className="pw-skel h-9 w-20 rounded" />
+          </div>
+        </div>
+        <div className="mx-auto px-6 pb-20 pt-7" style={{ maxWidth: 1080 }}>
+          {/* 작품 헤더 카드 스켈레톤 */}
+          <div className="mb-4 rounded-xl border border-hairline bg-white p-6">
+            <div className={isWide ? "flex gap-6" : "flex flex-col gap-5"}>
+              <div className="pw-skel rounded-lg" style={{ width: isWide ? 180 : 150, aspectRatio: "2/3", height: "auto", flexShrink: 0 }} />
+              <div className="flex flex-1 flex-col gap-3">
+                <div className="flex gap-2">
+                  <div className="pw-skel h-6 w-14 rounded-full" />
+                  <div className="pw-skel h-6 w-14 rounded-full" />
+                </div>
+                <div className="pw-skel h-7 w-3/4 rounded" />
+                <div className="pw-skel h-4 w-1/3 rounded" />
+                <div className="mt-2 flex gap-2">
+                  <div className="pw-skel h-9 w-24 rounded-lg" />
+                  <div className="pw-skel h-9 w-24 rounded-lg" />
+                </div>
+                <div className="mt-3 pw-skel h-2.5 w-full rounded-full" />
+              </div>
+            </div>
+          </div>
+          {/* 회차 목록 스켈레톤 */}
+          <div className="rounded-xl border border-hairline bg-white">
+            <div className="border-b border-hairline px-6 py-4">
+              <div className="pw-skel h-5 w-24 rounded" />
+            </div>
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center gap-4 border-b border-hairline px-6 py-4 last:border-b-0">
+                <div className="pw-skel h-4 w-8 rounded" />
+                <div className="pw-skel h-4 flex-1 rounded" />
+                <div className="pw-skel h-4 w-20 rounded" />
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-canvas">
       {/* TOP BAR */}
       <div className="sticky top-0 z-30 flex h-[60px] items-center justify-between gap-3 border-b border-hairline bg-white px-5">
         <button onClick={() => navigate("/library")} className="pw-btn-ghost h-[38px] flex-shrink-0 px-3 text-sm">← 작업실</button>
-        <div className="min-w-0 truncate text-base font-bold">회귀한 검, 황혼을 베다</div>
+        <div className="min-w-0 truncate text-base font-bold">{title}</div>
         <div className="flex flex-shrink-0 items-center gap-2">
           {isWide && (
             <>
-              <button onClick={() => navigate("/works/1/cover")} className="h-10 rounded border border-line2 bg-white px-3.5 text-[13px] font-bold text-ink2 transition hover:border-wash-2 hover:bg-wash hover:text-brand">표지 만들기</button>
-              <button onClick={() => navigate("/seller/register")} className="h-10 rounded border-none bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-brand-hover">판매 등록</button>
+              <button onClick={() => navigate(`/works/${novelId}/cover`)} className="h-10 rounded border border-line2 bg-white px-3.5 text-[13px] font-bold text-ink2 transition hover:border-wash-2 hover:bg-wash hover:text-brand">표지 만들기</button>
+              <button onClick={() => navigate("/seller/register", { state: { novelId, title } })} className="h-10 rounded border-none bg-brand px-4 text-[13px] font-bold text-white transition hover:bg-brand-hover">판매 등록</button>
             </>
           )}
           <div className="relative">
@@ -94,24 +173,26 @@ export default function DWorkDetail() {
         {/* WORK HEADER */}
         <div className="mb-4 rounded-xl border border-hairline bg-white p-6">
           <div style={isWide ? { display: "flex", gap: 24, alignItems: "flex-start" } : { display: "flex", flexDirection: "column", gap: 18 }}>
-            <div style={{ width: isWide ? 180 : 150, flexShrink: 0 }}><CoverTile title="회귀한 검, 황혼을 베다" author="지훈" variant={0} /></div>
+            <div style={{ width: isWide ? 180 : 150, flexShrink: 0 }}><CoverTile title={title} variant={0} src={coverUrl ?? undefined} /></div>
             <div className="min-w-0 flex-1">
               <div className="mb-2.5 flex flex-wrap items-center gap-2">
                 <span className={"rounded-full px-[11px] py-1 text-[11px] font-bold " + st.cls}>{st.label}</span>
                 <span className="rounded-full bg-[#f2f2f2] px-2.5 py-1 text-[11px] font-bold text-ink2">전체 이용가</span>
                 <span className="rounded-full bg-wash px-2.5 py-1 text-[11px] font-bold text-brand">AI 보조</span>
               </div>
-              <div className="text-[22px] font-bold leading-[1.3] tracking-[-0.5px]">회귀한 검, 황혼을 베다</div>
-              <div className="mt-1.5 text-sm text-muted">회귀 · 복수 · 다크판타지</div>
+              <div className="text-[22px] font-bold leading-[1.3] tracking-[-0.5px]">{title}</div>
+              <div className="mt-1.5 text-sm text-muted">{settings?.genres?.join(" · ") ?? ""}</div>
 
-              <div className="mt-4 flex flex-wrap gap-2">
-                {SETTING_CHIPS.map((c) => (
-                  <span key={c.label} className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-[#fafafa] px-3 py-2 text-[13px] text-ink2">
-                    <span className="text-[11px] font-bold text-muted">{c.label}</span>
-                    <span className="font-bold text-ink">{c.value}</span>
-                  </span>
-                ))}
-              </div>
+              {settingChips.length > 0 && (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {settingChips.map((c) => (
+                    <span key={c.label} className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-[#fafafa] px-3 py-2 text-[13px] text-ink2">
+                      <span className="text-[11px] font-bold text-muted">{c.label}</span>
+                      <span className="font-bold text-ink">{c.value}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
 
               <div className="mt-[18px]">
                 <div className="mb-[7px] flex items-center justify-between">
@@ -126,18 +207,6 @@ export default function DWorkDetail() {
           </div>
         </div>
 
-        {/* STATS */}
-        {showStats && (
-          <div className="mb-4 grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", animation: "pw-fade .25s ease" }}>
-            {STATS.map((s) => (
-              <div key={s.label} className="rounded-xl border border-hairline bg-white p-[18px]">
-                <div className="text-xs font-bold text-muted">{s.label}</div>
-                <div className={"mt-1.5 text-2xl font-bold tracking-[-0.5px] " + (s.brand ? "text-brand" : "text-ink")}>{s.value}</div>
-              </div>
-            ))}
-          </div>
-        )}
-
         {/* PRIVATE NOTICE */}
         {isPrivate && (
           <div className="mb-4 flex items-center gap-2.5 rounded-xl border border-hairline bg-white px-[18px] py-4">
@@ -146,48 +215,139 @@ export default function DWorkDetail() {
           </div>
         )}
 
+        {/* SETTINGS PANEL */}
+        {settings && (
+          <div className="mb-4 rounded-xl border border-hairline bg-white">
+            <button
+              onClick={() => setSettingsOpen((o) => !o)}
+              className="flex w-full items-center justify-between px-[22px] py-4"
+            >
+              <span className="text-base font-bold text-ink">작품 설정</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleEditSettings(); }}
+                  className="h-8 rounded border border-line2 bg-white px-3 text-[13px] font-bold text-ink2 transition hover:border-brand hover:text-brand"
+                >
+                  설정 편집
+                </button>
+                <span className="text-sm text-muted">{settingsOpen ? "▲" : "▼"}</span>
+              </div>
+            </button>
+
+            {settingsOpen && (
+              <div className="border-t border-hairline px-[22px] pb-5 pt-4" style={{ animation: "pw-fill .2s ease" }}>
+                {/* 기본 정보 */}
+                <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {settings.era && <SettingCell label="시대">{settings.era}</SettingCell>}
+                  {settings.genres?.length > 0 && <SettingCell label="장르">{settings.genres.join(" · ")}</SettingCell>}
+                  {settings.tone && <SettingCell label="문체·톤">{settings.tone}</SettingCell>}
+                  {settings.pov && <SettingCell label="시점">{settings.pov}</SettingCell>}
+                  {settings.length && <SettingCell label="분량">{settings.length}</SettingCell>}
+                  {settings.ageRating && <SettingCell label="연령등급">{settings.ageRating === "all" ? "전체이용가" : settings.ageRating === "15" ? "15세 이상" : "19세 이상"}</SettingCell>}
+                </div>
+
+                {/* 목표 / 갈등 */}
+                {(settings.goal || settings.conflict) && (
+                  <div className="mb-4">
+                    <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.06em] text-muted">서사</div>
+                    <div className="flex flex-col gap-2">
+                      {settings.goal && (
+                        <div className="rounded-lg bg-canvas px-3.5 py-2.5 text-[13px] text-ink">
+                          <span className="mr-2 text-[11px] font-bold text-muted">목표</span>{settings.goal}
+                        </div>
+                      )}
+                      {settings.conflict && (
+                        <div className="rounded-lg bg-canvas px-3.5 py-2.5 text-[13px] text-ink">
+                          <span className="mr-2 text-[11px] font-bold text-muted">갈등</span>{settings.conflict}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* 서사 흐름 */}
+                {settings.storyFlow && Object.values(settings.storyFlow).some(Boolean) && (
+                  <div className="mb-4">
+                    <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.06em] text-muted">서사 흐름</div>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      {(["발단", "전개", "위기", "절정"] as const).map((k) => settings.storyFlow[k] ? (
+                        <div key={k} className="rounded-lg bg-canvas px-3 py-2.5">
+                          <div className="mb-1 text-[11px] font-bold text-brand">{k}</div>
+                          <div className="text-[12px] leading-[1.5] text-ink">{settings.storyFlow[k]}</div>
+                        </div>
+                      ) : null)}
+                    </div>
+                  </div>
+                )}
+
+                {/* 등장인물 */}
+                {settings.characters?.length > 0 && (
+                  <div>
+                    <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.06em] text-muted">등장인물 {settings.characters.length}명</div>
+                    <div className="flex flex-col gap-1.5">
+                      {settings.characters.map((c, i) => (
+                        <div key={i} className="flex items-start gap-2.5 rounded-lg border border-hairline bg-white px-3.5 py-2.5">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-sm font-bold text-ink">{c.name}</span>
+                              <span className={"rounded-full px-2 py-0.5 text-[11px] font-bold " + (c.role === "protagonist" ? "bg-wash text-brand" : c.role === "villain" ? "bg-[#fdecec] text-error" : "bg-canvas text-ink2")}>
+                                {c.role === "protagonist" ? "주인공" : c.role === "villain" ? "빌런" : "조연"}
+                              </span>
+                              {c.autoAdded && (
+                                <span className="rounded-full bg-[#fff3e0] px-2 py-0.5 text-[11px] font-bold text-[#d9822b]">자동추가</span>
+                              )}
+                              {c.faction && <span className="text-[12px] text-muted">{c.faction}</span>}
+                              {c.rank && <span className="text-[12px] text-muted">· {c.rank}</span>}
+                            </div>
+                            {c.personality && <div className="mt-0.5 text-[12px] text-muted">{c.personality}</div>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* CHAPTER LIST */}
         <div className="rounded-xl border border-hairline bg-white p-[22px]">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <span className="text-base font-bold">회차 목록</span>
-              <span className="text-[13px] font-bold text-muted">{emptyMode ? "0화" : `${CHAPTERS.length}화`}</span>
+              <span className="text-[13px] font-bold text-muted">{done}화</span>
             </div>
-            <button onClick={() => showToast("다음 회차 생성을 시작합니다 (생성 로딩 C3)")} className="inline-flex h-10 items-center gap-1.5 rounded border-none bg-brand px-4 text-sm font-bold text-white transition hover:bg-brand-hover">+ 다음 회차 생성</button>
+            <button onClick={() => navigate(`/works/${novelId}/edit`)} className="inline-flex h-10 items-center gap-1.5 rounded border-none bg-brand px-4 text-sm font-bold text-white transition hover:bg-brand-hover">+ 다음 회차 생성</button>
           </div>
 
-          {emptyMode ? (
+          {chapters.length === 0 ? (
             <div className="px-6 py-12 text-center">
               <div className="text-[15px] font-bold text-ink2">아직 회차가 없어요</div>
               <div className="mt-1.5 text-[13px] text-muted">첫 회차를 생성하면 여기에 쌓여요.</div>
-              <button onClick={() => showToast("첫 회차 생성을 시작합니다 (C3)")} className="mt-[18px] h-[46px] rounded border-none bg-brand px-[22px] text-[15px] font-bold text-white">✦ 첫 회차 생성하기</button>
+              <button onClick={() => navigate(`/works/${novelId}/edit`)} className="mt-[18px] h-[46px] rounded border-none bg-brand px-[22px] text-[15px] font-bold text-white">✦ 첫 회차 생성하기</button>
             </div>
           ) : (
             <div className="flex flex-col">
-              {CHAPTERS.map((c) => {
-                const g = GRADE_MAP[c.grade], cs = STATE_MAP[c.state];
-                const generating = c.state === "generating";
+              {chapters.map((c) => {
+                const wordCount = Math.round(c.content.replace(/\s+/g, "").length / 2);
                 return (
-                  <div key={c.num} className="flex items-center gap-3.5 border-b border-[#f4f4f4] px-2 py-3.5 last:border-b-0">
-                    <span className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-lg bg-wash text-sm font-bold text-brand">{c.num}</span>
-                    <button onClick={() => showToast(`${c.num}화 편집 — 에디터로 이동 (C4)`)} className="min-w-0 flex-1 border-none bg-transparent p-0 text-left">
-                      <div className="truncate text-sm font-bold text-ink">{c.title}</div>
+                  <div key={c.seq} className="flex items-center gap-3.5 border-b border-[#f4f4f4] px-2 py-3.5 last:border-b-0">
+                    <span className="flex h-[34px] w-[34px] flex-shrink-0 items-center justify-center rounded-lg bg-wash text-sm font-bold text-brand">{c.seq}</span>
+                    <button onClick={() => navigate(`/works/${novelId}/edit`)} className="min-w-0 flex-1 border-none bg-transparent p-0 text-left">
+                      <div className="truncate text-sm font-bold text-ink">{c.seq}화</div>
                       <div className="mt-1 flex flex-wrap items-center gap-2">
-                        <span className="text-xs text-muted">{c.length}</span>
-                        <span className={"rounded-full px-[9px] py-[3px] text-[11px] font-bold " + g.cls}>{g.label}</span>
-                        <span className={"rounded-full px-[9px] py-[3px] text-[11px] font-bold " + cs.cls}>{cs.label}</span>
+                        <span className="text-xs text-muted">{wordCount.toLocaleString("ko-KR")}자</span>
+                        <span className="rounded-full bg-wash px-[9px] py-[3px] text-[11px] font-bold text-brand">AI 보조</span>
+                        <span className="rounded-full bg-[#f2f2f2] px-[9px] py-[3px] text-[11px] font-bold text-muted">생성됨</span>
                       </div>
                     </button>
-                    {generating ? (
-                      <div className="flex flex-shrink-0 items-center gap-[7px] text-xs font-bold text-brand"><span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-wash-2 border-t-brand" />생성 중</div>
-                    ) : (
-                      <div className="flex flex-shrink-0 items-center gap-1">
-                        <ActBtn wide onClick={() => showToast(`${c.num}화 읽기`)}>읽기</ActBtn>
-                        <ActBtn onClick={() => showToast(`${c.num}화 편집 — 에디터로 이동 (C4)`)}>✎</ActBtn>
-                        <ActBtn onClick={() => showToast(`${c.num}화 재생성`)}>↻</ActBtn>
-                        <ActBtn danger onClick={() => setConfirm(`ch-${c.num}`)}>✕</ActBtn>
-                      </div>
-                    )}
+                    <div className="flex flex-shrink-0 items-center gap-1">
+                      <ActBtn wide onClick={() => navigate(`/read/${novelId}`, { state: { seq: c.seq } })}>읽기</ActBtn>
+                      <ActBtn onClick={() => navigate(`/works/${novelId}/edit`)}>✎</ActBtn>
+                      <ActBtn onClick={() => showToast(`${c.seq}화 재생성은 에디터에서 할 수 있어요`)}>↻</ActBtn>
+                      <ActBtn danger onClick={() => showToast("회차 삭제는 준비 중이에요")}>✕</ActBtn>
+                    </div>
                   </div>
                 );
               })}
@@ -204,32 +364,32 @@ export default function DWorkDetail() {
               <div className="mt-0.5 text-[13px] leading-[1.5] text-muted">{isSelling ? '모든 회차가 "AI 보조" 이상이라 판매 조건을 충족해요.' : "판매하려면 회차별 창작 기여 점검을 거쳐요."}</div>
             </div>
           </div>
-          <button onClick={() => navigate("/seller/register")} className="pw-btn-slight h-11 flex-shrink-0 px-[18px] text-sm">{isSelling ? "판매 관리" : "판매 등록"}</button>
+          <button onClick={() => navigate("/seller/register", { state: { novelId, title } })} className="pw-btn-slight h-11 flex-shrink-0 px-[18px] text-sm">{isSelling ? "판매 관리" : "판매 등록"}</button>
         </div>
       </div>
 
       {/* DELETE CONFIRM */}
       {confirm && (
-        <div onClick={() => setConfirm(null)} className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-5" style={{ animation: "pw-fade .2s ease" }}>
+        <div onClick={() => !deleting && setConfirm(null)} className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-5" style={{ animation: "pw-fade .2s ease" }}>
           <div onClick={(e) => e.stopPropagation()} className="w-full max-w-[360px] rounded-[14px] bg-white p-[26px]" style={{ animation: "pw-pop .22s ease" }}>
-            <div className="text-[17px] font-bold text-ink">{confirmWork ? "작품을 삭제할까요?" : "회차를 삭제할까요?"}</div>
-            <div className="mt-2.5 text-sm leading-[1.6] text-ink2">{confirmWork ? "작품과 모든 회차가 영구 삭제돼요. 되돌릴 수 없어요." : "이 회차가 영구 삭제돼요. 되돌릴 수 없어요."}</div>
+            <div className="text-[17px] font-bold text-ink">작품을 삭제할까요?</div>
+            <div className="mt-2.5 text-sm leading-[1.6] text-ink2">작품과 모든 회차가 영구 삭제돼요. 되돌릴 수 없어요.</div>
             <div className="mt-[22px] flex gap-2.5">
-              <button onClick={() => setConfirm(null)} className="h-12 flex-1 rounded border border-line2 bg-white text-[15px] font-bold text-ink2">취소</button>
-              <button onClick={() => { setConfirm(null); showToast("삭제되었습니다"); }} className="h-12 flex-1 rounded border-none bg-error text-[15px] font-bold text-white">삭제</button>
+              <button onClick={() => setConfirm(null)} disabled={deleting} className="h-12 flex-1 rounded border border-line2 bg-white text-[15px] font-bold text-ink2">취소</button>
+              <button onClick={handleDeleteWork} disabled={deleting} className="h-12 flex-1 rounded border-none bg-error text-[15px] font-bold text-white disabled:opacity-60">{deleting ? "삭제 중..." : "삭제"}</button>
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+}
 
-      {/* demo status toggle */}
-      <div className="fixed bottom-4 right-4 z-50 flex gap-1 rounded-full border border-hairline bg-white p-1 shadow-[0_2px_12px_rgba(0,0,0,0.1)]">
-        <DemoSeg active={isPrivate && !emptyMode} onClick={() => { setStatus("private"); setEmptyMode(false); }}>비공개</DemoSeg>
-        <DemoSeg active={status === "public" && !emptyMode} onClick={() => { setStatus("public"); setEmptyMode(false); }}>공개</DemoSeg>
-        <DemoSeg active={isSelling && !emptyMode} onClick={() => { setStatus("selling"); setEmptyMode(false); }}>판매중</DemoSeg>
-        <DemoSeg active={emptyMode} onClick={() => setEmptyMode(true)}>빈 회차</DemoSeg>
-      </div>
-
+function SettingCell({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-lg bg-canvas px-3.5 py-2.5">
+      <div className="mb-0.5 text-[11px] font-bold text-muted">{label}</div>
+      <div className="text-[13px] font-bold text-ink">{children}</div>
     </div>
   );
 }
@@ -237,13 +397,6 @@ export default function DWorkDetail() {
 function ActBtn({ onClick, danger, wide, children }: { onClick: () => void; danger?: boolean; wide?: boolean; children: React.ReactNode }) {
   return (
     <button onClick={onClick} className={"flex h-[34px] flex-shrink-0 items-center justify-center whitespace-nowrap rounded-md border border-hairline bg-white text-[13px] font-bold transition hover:bg-canvas " + (wide ? "px-2.5" : "w-[34px]") + (danger ? " text-[#c4849f] hover:text-error" : " text-ink2 hover:text-brand")}>
-      {children}
-    </button>
-  );
-}
-function DemoSeg({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button onClick={onClick} className={"rounded-full px-[11px] py-[7px] text-xs font-bold transition " + (active ? "bg-brand text-white" : "bg-transparent text-muted")}>
       {children}
     </button>
   );

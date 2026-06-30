@@ -4,6 +4,8 @@ import { HybridSelect } from "@/components/HybridSelect";
 import { RadioPill } from "@/components/ui/RadioPill";
 import { useToast } from "@/components/Toast";
 import { useViewport } from "@/lib/useViewport";
+import { useWizard } from "@/providers/WizardProvider";
+import { suggestCharacters } from "@/lib/api";
 
 /* ── 옵션 데이터 (02·03) ─────────────────────────────────────────────── */
 const APPEARANCE_OPTIONS = ["은발 장신", "붉은 머리", "흑발 단신", "금발의 미인", "평범한 인상"];
@@ -24,32 +26,18 @@ const PERSONALITY_GROUPS: { label: string; items: { value: string; label: string
   },
 ];
 
-/* ── C0(세계관) 더미 — 실제로는 ①세계관 단계에서 정의된 값이 단일 출처로 흘러온다.
-   (world_rules/glossary와 같은 출처. 비어 있으면 인물 필드는 자유 입력으로 폴백) ── */
-const WORLD = {
-  factions: ["화산파", "천마신교", "무림맹", "사도련", "황실"],
-  ranksByFaction: {
-    "화산파": ["장문인", "일대제자", "이대제자", "삼대제자", "속가제자"],
-    "천마신교": ["교주", "호교법왕", "장로", "향주", "교도"],
-    "무림맹": ["맹주", "부맹주", "단주", "무사"],
-    "사도련": ["련주", "당주", "조장", "문도"],
-    "황실": ["황제", "태자", "대신", "금군", "내관"],
-  } as Record<string, string[]>,
-  statuses: ["왕족", "귀족", "양민", "평민", "천민", "무인", "관리", "상인"],
-};
-const worldDefined = true; // ①세계관에서 정의되면 true. false면 모든 연동 필드가 자유 입력.
-const ALL_RANKS = [...new Set(Object.values(WORLD.ranksByFaction).flat())];
+const STATUS_OPTIONS = ["왕족", "귀족", "양민", "평민", "천민", "무인", "관리", "상인", "노예", "이방인"];
 
 /* ── 타입 ────────────────────────────────────────────────────────────── */
 type Character = {
   id: number;
   name: string;
   gender: string;
-  faction: string;        // 소속 국가·세력 (세계관 연동)
+  faction: string;
   factionCustom: boolean;
-  rank: string;           // 지위/직급 (세계관 연동)
+  rank: string;
   rankCustom: boolean;
-  status: string;         // 신분 (세계관 연동, 선택)
+  status: string;
   statusCustom: boolean;
   birth: string;
   birthUnknown: boolean;
@@ -60,6 +48,11 @@ type Character = {
   personality: string;
   personalityCustom: boolean;
   protagonist: boolean;
+  // 심리 프로필
+  desire: string;
+  fear: string;
+  mannerism: string;
+  secret: string;
 };
 
 const newChar = (id: number): Character => ({
@@ -68,21 +61,46 @@ const newChar = (id: number): Character => ({
   birth: "", birthUnknown: true,
   appearance: "", appearanceCustom: false, body: "", bodyCustom: false,
   personality: "", personalityCustom: false, protagonist: false,
+  desire: "", fear: "", mannerism: "", secret: "",
 });
 
 export default function C1SettingsWizard() {
   const { isMobile, isDesktop } = useViewport();
   const { showToast } = useToast();
   const navigate = useNavigate();
-  const uid = useRef(3);
+  const { saveCharacters, data: wizData } = useWizard();
 
   const [aiLoading, setAiLoading] = useState(false);
-  const aiTimer = useRef<number | undefined>(undefined);
-  const [characters, setCharacters] = useState<Character[]>([
-    { ...newChar(1), name: "카엘", gender: "남성", faction: "화산파", rank: "일대제자", status: "무인", birthUnknown: true, appearance: "은발 장신", body: "왼눈 흉터", personality: "냉철", protagonist: true },
-    { ...newChar(2), name: "리나", gender: "여성", faction: "화산파", rank: "이대제자", status: "양민", birth: "1187-05-12", birthUnknown: false, appearance: "붉은 머리", body: "화상 흉터", personality: "활달", protagonist: false },
-    { ...newChar(3), name: "제로드", gender: "남성", faction: "천마신교", rank: "교주", status: "귀족", birthUnknown: true, appearance: "흑발 단신", body: "전신 문신", personality: "오만함", protagonist: false },
-  ]);
+  const [aiCount, setAiCount] = useState(5);
+  const [characters, setCharacters] = useState<Character[]>(() => {
+    const wc = wizData.characters;
+    if (!wc.length) return [newChar(1)];
+    return wc.map((c, idx) => ({
+      ...newChar(idx + 1),
+      name: c.name,
+      gender: c.gender ?? "",
+      faction: c.faction ?? "",
+      factionCustom: c.factionCustom ?? false,
+      rank: c.rank ?? "",
+      rankCustom: c.rankCustom ?? false,
+      status: c.status ?? "",
+      statusCustom: c.statusCustom ?? false,
+      birth: c.birth ?? "",
+      birthUnknown: c.birthUnknown ?? true,
+      appearance: c.appearance,
+      appearanceCustom: c.appearanceCustom ?? false,
+      body: c.trait,
+      bodyCustom: c.bodyCustom ?? false,
+      personality: c.personality,
+      personalityCustom: c.personalityCustom ?? false,
+      protagonist: c.role === "protagonist",
+      desire: c.desire ?? "",
+      fear: c.fear ?? "",
+      mannerism: c.mannerism ?? "",
+      secret: c.secret ?? "",
+    }));
+  });
+  const uid = useRef(Math.max(wizData.characters.length, 1));
 
   /* ── 액션 ──────────────────────────────────────────────────────────── */
   const updateChar = (id: number, patch: Partial<Character>) =>
@@ -92,18 +110,75 @@ export default function C1SettingsWizard() {
   const addChar = () => setCharacters((cs) => [...cs, newChar(++uid.current)]);
   const removeChar = (id: number) => setCharacters((cs) => cs.filter((c) => c.id !== id));
 
-  const aiAutofill = () => {
+  const aiAutofill = async () => {
     setAiLoading(true);
-    aiTimer.current = window.setTimeout(() => {
-      setCharacters([
-        { ...newChar(++uid.current), name: "카엘", gender: "남성", faction: "화산파", rank: "일대제자", status: "무인", birthUnknown: true, appearance: "은발 장신", body: "왼눈 흉터", personality: "냉철", protagonist: true },
-        { ...newChar(++uid.current), name: "리나", gender: "여성", faction: "화산파", rank: "이대제자", status: "양민", birth: "1187-05-12", birthUnknown: false, appearance: "붉은 머리", body: "화상 흉터", personality: "활달", protagonist: false },
-        { ...newChar(++uid.current), name: "제로드", gender: "남성", faction: "천마신교", rank: "교주", status: "귀족", birthUnknown: true, appearance: "흑발 단신", body: "전신 문신", personality: "오만함", protagonist: false },
-      ]);
+    try {
+      const res = await suggestCharacters({ era: wizData.era, genres: wizData.genres, worldFactions: wizData.worldFactions, worldRanks: wizData.worldRanks, worldRules: wizData.worldRules, count: aiCount });
+      if (!Array.isArray(res.characters) || res.characters.length === 0) {
+        throw new Error("AI 응답이 불완전해요. 잠시 후 다시 시도해보세요.");
+      }
+      const allPersonalityValues = PERSONALITY_GROUPS.flatMap((g) => g.items.map((it) => it.value));
+      setCharacters(res.characters.map((c) => {
+        const inFactions = wizData.worldFactions.includes(c.faction);
+        const inRanks = wizData.worldRanks.includes(c.rank);
+        const inStatus = !!c.status && STATUS_OPTIONS.includes(c.status);
+        const inAppearance = APPEARANCE_OPTIONS.includes(c.appearance);
+        const inPersonality = allPersonalityValues.includes(c.personality);
+        // age → birth date (approximate: 현재 2025 기준)
+        const birthYear = c.age ? 2025 - c.age : null;
+        const birthVal = birthYear ? `${birthYear}-01-01` : "";
+        return {
+          ...newChar(++uid.current),
+          name: c.name,
+          gender: c.gender,
+          status: c.status ?? "",
+          statusCustom: !!c.status && !inStatus,
+          faction: c.faction,
+          factionCustom: !!c.faction && !inFactions,
+          rank: c.rank,
+          rankCustom: !!c.rank && !inRanks,
+          birth: birthVal,
+          birthUnknown: !birthVal,
+          appearance: c.appearance,
+          appearanceCustom: !!c.appearance && !inAppearance,
+          body: c.trait ?? "",
+          bodyCustom: !!c.trait,
+          personality: c.personality,
+          personalityCustom: !!c.personality && !inPersonality,
+          protagonist: c.role === "protagonist",
+        };
+      }));
+      showToast("AI가 세계관에 맞는 인물을 채웠어요");
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : "AI 생성 실패");
+    } finally {
       setAiLoading(false);
-      showToast("AI가 세계관에 맞춘 인물을 채웠어요");
-    }, 1300);
+    }
   };
+
+  const serializeChars = () => characters.map((c) => ({
+    name: c.name,
+    gender: c.gender,
+    faction: c.faction,
+    factionCustom: c.factionCustom,
+    rank: c.rank,
+    rankCustom: c.rankCustom,
+    status: c.status,
+    statusCustom: c.statusCustom,
+    birth: c.birth,
+    birthUnknown: c.birthUnknown,
+    appearance: c.appearance,
+    appearanceCustom: c.appearanceCustom,
+    trait: c.body,
+    bodyCustom: c.bodyCustom,
+    personality: c.personality,
+    personalityCustom: c.personalityCustom,
+    role: c.protagonist ? "protagonist" : "supporting",
+    desire: c.desire,
+    fear: c.fear,
+    mannerism: c.mannerism,
+    secret: c.secret,
+  }));
 
   /* ── 검증 ──────────────────────────────────────────────────────────── */
   const charsFilled = characters.length > 0 && characters.every((c) => c.name.trim());
@@ -130,21 +205,35 @@ export default function C1SettingsWizard() {
           </div>
 
           {/* AI assist */}
-          <div className="mb-5 flex flex-wrap items-center justify-between gap-3.5 rounded-lg border border-wash-border bg-wash px-[18px] py-4">
-            <div className="min-w-[200px]">
-              <div className="text-[15px] font-bold text-ink">막막하다면, AI에게 맡겨보세요</div>
-              <div className="mt-[3px] text-[13px] text-ink2">세계관에 어울리는 인물을 한 번에 채워드려요. 언제든 수정할 수 있어요.</div>
+          <div className="mb-5 rounded-lg border border-wash-border bg-wash px-[18px] py-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-[200px]">
+                <div className="text-[15px] font-bold text-ink">막막하다면, AI에게 맡겨보세요</div>
+                <div className="mt-[3px] text-[13px] text-ink2">세계관에 어울리는 인물을 한 번에 채워드려요. 언제든 수정할 수 있어요.</div>
+              </div>
+              {aiLoading ? (
+                <button disabled className="pw-btn-primary h-11 px-[18px] text-[15px] opacity-90" style={{ cursor: "default" }}>
+                  <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                  채우는 중...
+                </button>
+              ) : (
+                <button onClick={aiAutofill} className="pw-btn-primary h-11 whitespace-nowrap px-[18px] text-[15px]">
+                  ✦ AI 추천 자동채움 ({aiCount}명)
+                </button>
+              )}
             </div>
-            {aiLoading ? (
-              <button disabled className="pw-btn-primary h-11 px-[18px] text-[15px] opacity-90" style={{ cursor: "default" }}>
-                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                채우는 중...
-              </button>
-            ) : (
-              <button onClick={aiAutofill} className="pw-btn-primary h-11 whitespace-nowrap px-[18px] text-[15px]">
-                ✦ AI 추천 자동채움
-              </button>
-            )}
+            <div className="mt-3 flex items-center gap-2">
+              <span className="text-[12px] font-bold text-muted">인물 수</span>
+              {[3, 5, 7, 10].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setAiCount(n)}
+                  className={"h-7 min-w-[34px] rounded-md px-2 text-[13px] font-bold transition " + (aiCount === n ? "bg-brand text-white" : "bg-white border border-line2 text-ink2 hover:border-brand hover:text-brand")}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* CARD: 등장인물 */}
@@ -167,6 +256,8 @@ export default function C1SettingsWizard() {
                 ch={c}
                 index={i + 1}
                 canRemove={characters.length > 1}
+                factionOptions={wizData.worldFactions}
+                rankOptions={wizData.worldRanks}
                 onChange={(patch) => updateChar(c.id, patch)}
                 onSetProtagonist={(v) => setProtagonist(c.id, v)}
                 onRemove={() => removeChar(c.id)}
@@ -187,10 +278,10 @@ export default function C1SettingsWizard() {
                 {!valid && <span className="text-[13px] font-bold text-muted">인물 이름을 채우면 다음으로 넘어갈 수 있어요.</span>}
                 <button
                   disabled={!valid}
-                  onClick={() => navigate("/create/narrative")}
+                  onClick={() => { saveCharacters(serializeChars()); navigate("/create/relations"); }}
                   className={(valid ? "pw-btn-primary" : "pw-btn-disabled") + " h-14 px-7 text-lg"}
                 >
-                  다음: 서사설정 →
+                  다음: 관계도 →
                 </button>
               </div>
             </div>
@@ -248,10 +339,10 @@ export default function C1SettingsWizard() {
             <button onClick={() => navigate("/create/world")} className="h-[54px] flex-shrink-0 rounded border border-line2 bg-white px-[18px] text-[15px] font-bold text-ink2">← 이전</button>
             <button
               disabled={!valid}
-              onClick={() => navigate("/create/narrative")}
+              onClick={() => { saveCharacters(serializeChars()); navigate("/create/relations"); }}
               className={(valid ? "pw-btn-primary" : "pw-btn-disabled") + " h-[54px] flex-1 text-base"}
             >
-              다음: 서사설정 →
+              다음: 관계도 →
             </button>
           </div>
         </div>
@@ -263,23 +354,48 @@ export default function C1SettingsWizard() {
 
 /* ── 인물 카드 ─────────────────────────────────────────────────────────── */
 function CharacterCard({
-  ch, index, canRemove, onChange, onSetProtagonist, onRemove,
+  ch, index, canRemove, factionOptions, rankOptions, onChange, onSetProtagonist, onRemove,
 }: {
   ch: Character;
   index: number;
   canRemove: boolean;
+  factionOptions: string[];
+  rankOptions: string[];
   onChange: (patch: Partial<Character>) => void;
   onSetProtagonist: (v: boolean) => void;
   onRemove: () => void;
 }) {
+  const [psyOpen, setPsyOpen] = useState(false);
   const nameErr = !ch.name.trim();
-
-  // 세계관 연동 옵션: worldDefined면 목록, 아니면 빈 배열(=자유 입력 폴백).
-  const factionOptions = worldDefined ? WORLD.factions : [];
-  const statusOptions = worldDefined ? WORLD.statuses : [];
-  // 지위/직급: 가능하면 선택한 세력 기준, 없으면 전체 직급으로 폴백.
-  const rankOptions = worldDefined ? (WORLD.ranksByFaction[ch.faction] ?? ALL_RANKS) : [];
   const worldEmpty = factionOptions.length === 0;
+
+  // 목록에 없는 값이 select 모드로 설정된 경우, 자동으로 커스텀 텍스트 입력으로 전환
+  const factionEff = ch.factionCustom || (!!ch.faction && factionOptions.length > 0 && !factionOptions.includes(ch.faction));
+  const rankEff = ch.rankCustom || (!!ch.rank && rankOptions.length > 0 && !rankOptions.includes(ch.rank));
+  const statusEff = ch.statusCustom || (!!ch.status && !STATUS_OPTIONS.includes(ch.status));
+
+  const toggleFaction = () => {
+    if (factionEff) {
+      // select 모드로 전환 시 목록에 없는 값이면 초기화
+      onChange({ factionCustom: false, ...(!factionOptions.includes(ch.faction) ? { faction: "" } : {}) });
+    } else {
+      onChange({ factionCustom: true });
+    }
+  };
+  const toggleRank = () => {
+    if (rankEff) {
+      onChange({ rankCustom: false, ...(!rankOptions.includes(ch.rank) ? { rank: "" } : {}) });
+    } else {
+      onChange({ rankCustom: true });
+    }
+  };
+  const toggleStatus = () => {
+    if (statusEff) {
+      onChange({ statusCustom: false, ...(!STATUS_OPTIONS.includes(ch.status) ? { status: "" } : {}) });
+    } else {
+      onChange({ statusCustom: true });
+    }
+  };
 
   return (
     <div className="pw-card mb-3 p-[18px]">
@@ -322,19 +438,19 @@ function CharacterCard({
           )}
         </div>
         <div className="grid grid-cols-3 gap-3.5">
-          <HybridSelect label="소속 국가·세력" custom={ch.factionCustom} onToggleCustom={() => onChange({ factionCustom: !ch.factionCustom })} value={ch.faction} onChange={(v) => onChange({ faction: v })} customPlaceholder="예: 화산파">
+          <HybridSelect label="소속 국가·세력" custom={factionEff} onToggleCustom={toggleFaction} value={ch.faction} onChange={(v) => onChange({ faction: v })} customPlaceholder="예: 화산파">
             <option value="">선택</option>
-            {factionOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+            {[...new Set(factionOptions)].map((o) => <option key={o} value={o}>{o}</option>)}
           </HybridSelect>
 
-          <HybridSelect label="지위/직급" custom={ch.rankCustom} onToggleCustom={() => onChange({ rankCustom: !ch.rankCustom })} value={ch.rank} onChange={(v) => onChange({ rank: v })} customPlaceholder="예: 일대제자">
+          <HybridSelect label="지위/직급" custom={rankEff} onToggleCustom={toggleRank} value={ch.rank} onChange={(v) => onChange({ rank: v })} customPlaceholder="예: 일대제자">
             <option value="">선택</option>
-            {rankOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+            {[...new Set(rankOptions)].map((o) => <option key={o} value={o}>{o}</option>)}
           </HybridSelect>
 
-          <HybridSelect label="신분" custom={ch.statusCustom} onToggleCustom={() => onChange({ statusCustom: !ch.statusCustom })} value={ch.status} onChange={(v) => onChange({ status: v })} customPlaceholder="예: 양민">
+          <HybridSelect label="신분" custom={statusEff} onToggleCustom={toggleStatus} value={ch.status} onChange={(v) => onChange({ status: v })} customPlaceholder="예: 양민">
             <option value="">선택</option>
-            {statusOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+            {STATUS_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
           </HybridSelect>
         </div>
       </div>
@@ -387,6 +503,64 @@ function CharacterCard({
         <span className="pw-field-label">주인공</span>
         <RadioPill selected={ch.protagonist} onClick={() => onSetProtagonist(true)}>예</RadioPill>
         <RadioPill selected={!ch.protagonist} onClick={() => onSetProtagonist(false)}>아니오</RadioPill>
+      </div>
+
+      {/* 심리 프로필 (접힘/펼침) */}
+      <div className="mt-4 border-t border-hairline pt-4">
+        <button
+          type="button"
+          onClick={() => setPsyOpen((o) => !o)}
+          className="flex w-full items-center justify-between text-[13px] font-bold text-ink2"
+        >
+          <span className="flex items-center gap-1.5">
+            심리 프로필
+            <span className="text-[11px] font-normal text-muted">선택 · 캐릭터 일관성에 도움돼요</span>
+          </span>
+          <span className="text-muted">{psyOpen ? "▲" : "▼"}</span>
+        </button>
+        {psyOpen && (
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <div>
+              <div className="mb-1 pw-field-label">핵심 욕망</div>
+              <input
+                value={ch.desire}
+                onChange={(e) => onChange({ desire: e.target.value })}
+                placeholder='예: 황위를 되찾고 싶다'
+                className="pw-input text-[14px]"
+              />
+            </div>
+            <div>
+              <div className="mb-1 pw-field-label">핵심 두려움</div>
+              <input
+                value={ch.fear}
+                onChange={(e) => onChange({ fear: e.target.value })}
+                placeholder='예: 다시 버려지는 것'
+                className="pw-input text-[14px]"
+              />
+            </div>
+            <div>
+              <div className="mb-1 pw-field-label">말버릇·습관</div>
+              <input
+                value={ch.mannerism}
+                onChange={(e) => onChange({ mannerism: e.target.value })}
+                placeholder='예: "반드시"를 자주 쓴다'
+                className="pw-input text-[14px]"
+              />
+            </div>
+            <div>
+              <div className="mb-1 pw-field-label flex items-center gap-1">
+                비밀
+                <span className="text-[10px] font-normal text-muted">(독자 비공개)</span>
+              </div>
+              <input
+                value={ch.secret}
+                onChange={(e) => onChange({ secret: e.target.value })}
+                placeholder='예: 사실 12황자다'
+                className="pw-input text-[14px]"
+              />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

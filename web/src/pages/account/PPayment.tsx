@@ -45,10 +45,9 @@ export default function PPayment() {
   const [paying, setPaying] = useState(false);
   const [result, setResult] = useState<null | "success" | "fail">(null);
   const [cycle, setCycle] = useState<"monthly" | "yearly">("monthly");
-  const [minorMode, setMinorMode] = useState(false);
 
   const pkg = PACKAGES[pkgIdx];
-  const overLimit = minorMode && MONTH_USED + pkg.amount > MONTH_LIMIT;
+  const overLimit = false;
   const limitPct = Math.min(100, Math.round((MONTH_USED / MONTH_LIMIT) * 100));
   const payBlocked = paying || !agree || overLimit;
   const yearly = cycle === "yearly";
@@ -125,12 +124,8 @@ export default function PPayment() {
               <div className="h-2 overflow-hidden rounded-full border border-hairline bg-white">
                 <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${limitPct}%`, background: overLimit ? "#f16361" : "#816bff" }} />
               </div>
-              <div className={"mt-2 text-xs leading-[1.5] " + (overLimit ? "text-[#c0504e]" : "text-[#7a6ab0]")}>
-                {!minorMode
-                  ? "미성년 회원은 1회 50,000원 · 월 200,000원 한도가 적용돼요."
-                  : overLimit
-                  ? "이번 결제로 월 한도(200,000원)를 초과해요. 충전 금액을 줄이거나 다음 달에 다시 시도해 주세요."
-                  : `이번 달 ${fmt(MONTH_LIMIT - MONTH_USED)}원 더 결제할 수 있어요.`}
+              <div className="mt-2 text-xs leading-[1.5] text-[#7a6ab0]">
+                미성년 회원은 1회 50,000원 · 월 200,000원 한도가 적용돼요.
               </div>
             </div>
 
@@ -228,12 +223,6 @@ export default function PPayment() {
         </div>
       )}
 
-      {/* demo state switcher */}
-      <div className="fixed bottom-4 right-4 z-40 flex gap-1 rounded-full border border-hairline bg-white p-1 shadow-[0_2px_12px_rgba(0,0,0,0.1)]">
-        <DemoSeg active={!minorMode} onClick={() => setMinorMode(false)}>기본</DemoSeg>
-        <DemoSeg active={minorMode} onClick={() => { setMinorMode(true); setTab("charge"); }}>한도초과</DemoSeg>
-      </div>
-
     </div>
   );
 }
@@ -248,13 +237,6 @@ function TabBtn({ active, onClick, children }: { active: boolean; onClick: () =>
 function CycleBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button onClick={onClick} className={"h-[38px] rounded-full px-[18px] text-[13px] font-bold transition " + (active ? "bg-white text-brand shadow-[0_1px_4px_rgba(0,0,0,0.08)]" : "bg-transparent text-muted")}>
-      {children}
-    </button>
-  );
-}
-function DemoSeg({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button onClick={onClick} className={"rounded-full px-3 py-[7px] text-[13px] font-bold transition " + (active ? "bg-brand text-white" : "bg-transparent text-muted")}>
       {children}
     </button>
   );

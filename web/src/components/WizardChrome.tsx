@@ -2,18 +2,19 @@ import type { ReactNode } from "react";
 
 /** 위저드 공통 chrome: 상단 바 + 5스텝 인디케이터 (C0~C4 공유). */
 
-const STEPS = ["세계관", "기본설정", "서사설정", "관계도", "출력설정"];
+const STEPS = ["세계관", "기본설정", "관계도", "서사설정", "출력설정"];
 
 type Props = {
   /** 현재 단계 (1~5) */
   current: number;
   isMobile: boolean;
   maxWidth?: number;
+  isEditMode?: boolean;
   onBack: () => void;
   onSaveDraft: () => void;
 };
 
-export function WizardChrome({ current, isMobile, maxWidth = 1120, onBack, onSaveDraft }: Props) {
+export function WizardChrome({ current, isMobile, maxWidth = 1120, isEditMode = false, onBack, onSaveDraft }: Props) {
   return (
     <>
       {/* TOP BAR */}
@@ -21,10 +22,23 @@ export function WizardChrome({ current, isMobile, maxWidth = 1120, onBack, onSav
         <button onClick={onBack} className="pw-btn-ghost h-[38px] px-3 text-sm">
           ← 뒤로
         </button>
-        <div className="text-lg font-bold tracking-[-0.2px] text-ink">새 작품 만들기</div>
-        <button onClick={onSaveDraft} className="pw-btn-slight h-10 px-4 text-sm">
-          임시저장
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="text-lg font-bold tracking-[-0.2px] text-ink">
+            {isEditMode ? "설정 편집" : "새 작품 만들기"}
+          </div>
+          {isEditMode && (
+            <span className="rounded-full bg-[#fff3e0] px-2.5 py-0.5 text-[12px] font-bold text-[#d9822b]">
+              편집 중
+            </span>
+          )}
+        </div>
+        {isEditMode ? (
+          <div className="w-[72px]" />
+        ) : (
+          <button onClick={onSaveDraft} className="pw-btn-slight h-10 px-4 text-sm">
+            임시저장
+          </button>
+        )}
       </div>
 
       {/* STEPPER */}

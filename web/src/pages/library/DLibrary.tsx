@@ -1,19 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { LibraryCard, type WorkStatus } from "@/components/LibraryCard";
-import { useToast } from "@/components/Toast";
 import { GlobalNav } from "@/components/GlobalNav";
+import { listNovels, deleteNovel } from "@/lib/api";
 
-type Work = { id: number; title: string; genre: string; updated: string; done: number; total: number; status: WorkStatus; variant: number };
-
-const ALL: Work[] = [
-  { id: 1, title: "회귀한 검, 황혼을 베다", genre: "회귀·복수", updated: "2일 전", done: 12, total: 30, status: "selling", variant: 0 },
-  { id: 2, title: "악녀는 두 번 울지 않는다", genre: "로맨스판타지", updated: "5일 전", done: 8, total: 24, status: "public", variant: 2 },
-  { id: 3, title: "현대 마법사 표류기", genre: "현대 판타지", updated: "1주 전", done: 3, total: 20, status: "private", variant: 4 },
-  { id: 4, title: "폐허의 연금술사", genre: "이세계·성장", updated: "3주 전", done: 30, total: 30, status: "selling", variant: 1 },
-  { id: 5, title: "검은 탑의 마지막 기사", genre: "다크 판타지", updated: "오늘", done: 1, total: 12, status: "private", variant: 5 },
-  { id: 6, title: "별을 삼킨 아이", genre: "SF·드라마", updated: "2주 전", done: 6, total: 18, status: "public", variant: 3 },
-];
+type Novel = { id: string; title: string; status: string; created_at: string; cover_url: string | null; done_chapters: number; total_chapters: number };
 
 const FILTERS: { key: WorkStatus | "all"; label: string }[] = [
   { key: "all", label: "전체" },
@@ -22,41 +13,69 @@ const FILTERS: { key: WorkStatus | "all"; label: string }[] = [
   { key: "selling", label: "판매중" },
 ];
 
-type Mode = "normal" | "empty";
+function relativeDate(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return "방금 전";
+  if (m < 60) return `${m}분 전`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}시간 전`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}일 전`;
+  return new Date(iso).toLocaleDateString("ko-KR", { month: "short", day: "numeric" });
+}
 
 export default function DLibrary() {
-  const { showToast } = useToast();
   const navigate = useNavigate();
-  const loadT = useRef<number | undefined>(undefined);
-
+  const [novels, setNovels] = useState<Novel[]>([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<WorkStatus | "all">("all");
-  const [mode, setMode] = useState<Mode>("normal");
-  const [loading, setLoading] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => () => window.clearTimeout(loadT.current), []);
+  useEffect(() => {
+    listNovels()
+      .then(setNovels)
+      .catch(() => setNovels([]))
+      .finally(() => setLoading(false));
+  }, []);
 
-  const isEmpty = mode === "empty";
   const counts = {
-    all: ALL.length,
-    private: ALL.filter((w) => w.status === "private").length,
-    public: ALL.filter((w) => w.status === "public").length,
-    selling: ALL.filter((w) => w.status === "selling").length,
+    all: novels.length,
+    private: novels.filter((n) => n.status === "draft" || n.status === "private").length,
+    public: novels.filter((n) => n.status === "public").length,
+    selling: novels.filter((n) => n.status === "selling").length,
   };
 
-  const filtered = isEmpty ? [] : ALL.filter((w) => filter === "all" || w.status === filter);
-  const showEmpty = !loading && isEmpty;
-  const showNoResult = !loading && !isEmpty && filtered.length === 0;
-  const showGrid = !loading && !isEmpty && filtered.length > 0;
+  const filtered = novels.filter((n) => {
+    if (filter === "all") return true;
+    if (filter === "private") return n.status === "draft" || n.status === "private";
+    return n.status === filter;
+  });
 
-  const demoLoading = () => {
-    setMode("normal"); setLoading(true);
-    window.clearTimeout(loadT.current);
-    loadT.current = window.setTimeout(() => setLoading(false), 1800);
+  const confirmTitle = confirmDeleteId ? (novels.find((n) => n.id === confirmDeleteId)?.title ?? "") : "";
+
+  const handleDelete = async () => {
+    if (!confirmDeleteId || deleting) return;
+    setDeleting(true);
+    try {
+      await deleteNovel(confirmDeleteId);
+      setNovels((prev) => prev.filter((n) => n.id !== confirmDeleteId));
+      setConfirmDeleteId(null);
+    } catch {
+      // 삭제 실패 시 다이얼로그만 닫기
+      setConfirmDeleteId(null);
+    } finally {
+      setDeleting(false);
+    }
   };
+
+  const isEmpty = !loading && novels.length === 0;
+  const showNoResult = !loading && novels.length > 0 && filtered.length === 0;
+  const showGrid = !loading && filtered.length > 0;
 
   return (
     <div className="min-h-screen bg-canvas">
-      {/* GLOBAL NAV */}
       <GlobalNav active="library" />
 
       <div className="mx-auto px-6 pb-20 pt-8" style={{ maxWidth: 1180 }}>
@@ -64,9 +83,15 @@ export default function DLibrary() {
         <div className="mb-[22px] flex flex-wrap items-end justify-between gap-4">
           <div>
             <div className="text-[28px] font-bold tracking-[-0.5px] text-ink">내 작업실</div>
-            <div className="mt-[5px] text-sm text-muted">{isEmpty ? "아직 작품이 없어요" : `${counts.all}개의 작품 · ${counts.selling}개 판매중`}</div>
+            <div className="mt-[5px] text-sm text-muted">
+              {isEmpty ? "아직 작품이 없어요" : `${counts.all}개의 작품 · ${counts.selling}개 판매중`}
+            </div>
           </div>
-          <button onClick={() => navigate("/create/world")} className="inline-flex h-12 items-center gap-2 rounded border-none bg-brand px-5 text-[15px] font-bold text-white transition hover:bg-brand-hover" style={{ boxShadow: "0 4px 14px rgba(129,107,255,0.32)" }}>
+          <button
+            onClick={() => navigate("/create/world")}
+            className="inline-flex h-12 items-center gap-2 rounded border-none bg-brand px-5 text-[15px] font-bold text-white transition hover:bg-brand-hover"
+            style={{ boxShadow: "0 4px 14px rgba(129,107,255,0.32)" }}
+          >
             + 새 작품
           </button>
         </div>
@@ -75,7 +100,6 @@ export default function DLibrary() {
         <div className="mb-6 flex flex-wrap gap-2">
           {FILTERS.map((f) => {
             const active = filter === f.key;
-            const count = isEmpty ? 0 : counts[f.key];
             return (
               <button
                 key={f.key}
@@ -83,7 +107,7 @@ export default function DLibrary() {
                 className={"inline-flex h-10 items-center gap-[7px] rounded-full border px-4 text-sm font-bold transition " + (active ? "border-brand bg-brand text-white" : "border-line2 bg-white text-ink2")}
               >
                 {f.label}
-                <span className={"rounded-full px-[7px] py-px text-xs font-bold " + (active ? "bg-white/[0.22] text-white" : "bg-wash text-brand")}>{count}</span>
+                <span className={"rounded-full px-[7px] py-px text-xs font-bold " + (active ? "bg-white/[0.22] text-white" : "bg-wash text-brand")}>{counts[f.key]}</span>
               </button>
             );
           })}
@@ -105,7 +129,7 @@ export default function DLibrary() {
               </div>
             ))}
           </div>
-        ) : showEmpty ? (
+        ) : isEmpty ? (
           <div className="rounded-2xl border border-dashed border-wash-2 bg-white px-6 py-[72px] text-center" style={{ animation: "pw-fade .3s ease" }}>
             <div className="mx-auto mb-[22px] flex h-[88px] w-[88px] items-center justify-center rounded-[20px] bg-wash">
               <div className="h-[58px] w-[46px] rounded" style={{ background: "linear-gradient(135deg,#816bff,#a892ff)", boxShadow: "0 6px 16px rgba(129,107,255,0.4)", transform: "rotate(-6deg)" }} />
@@ -122,35 +146,63 @@ export default function DLibrary() {
           </div>
         ) : showGrid ? (
           <div className="grid gap-5" style={{ gridTemplateColumns: "repeat(auto-fill,minmax(280px,1fr))", animation: "pw-fade .3s ease" }}>
-            {filtered.map((w) => (
+            {filtered.map((n, i) => (
               <LibraryCard
-                key={w.id}
-                {...w}
-                onOpen={() => navigate(`/works/${w.id}/edit`)}
-                onWrite={() => showToast(`「${w.title}」 이어쓰기`)}
-                onCover={() => showToast(`「${w.title}」 표지 만들기`)}
-                onSell={() => showToast(w.status === "selling" ? "판매 관리로 이동" : `「${w.title}」 판매 등록`)}
+                key={n.id}
+                title={n.title}
+                genre={n.status === "draft" ? "비공개" : n.status}
+                updated={relativeDate(n.created_at)}
+                done={n.done_chapters}
+                total={n.total_chapters}
+                status={(n.status === "draft" ? "private" : n.status) as WorkStatus}
+                variant={i % 6}
+                src={n.cover_url ?? undefined}
+                onOpen={() => navigate(`/works/${n.id}/edit`)}
+                onWrite={() => navigate(`/works/${n.id}/edit`)}
+                onCover={() => navigate(`/works/${n.id}/cover`)}
+                onSell={() => navigate("/seller/register", { state: { novelId: n.id, title: n.title } })}
+                onDelete={() => setConfirmDeleteId(n.id)}
               />
             ))}
           </div>
         ) : null}
       </div>
 
-      {/* demo state switcher */}
-      <div className="fixed bottom-4 right-4 z-40 flex gap-1 rounded-full border border-hairline bg-white p-1 shadow-[0_2px_12px_rgba(0,0,0,0.1)]">
-        <DemoSeg active={mode === "normal" && !loading} onClick={() => { setMode("normal"); setLoading(false); }}>목록</DemoSeg>
-        <DemoSeg active={loading} onClick={demoLoading}>로딩</DemoSeg>
-        <DemoSeg active={mode === "empty"} onClick={() => { setMode("empty"); setLoading(false); }}>빈 상태</DemoSeg>
-      </div>
-
+      {/* 삭제 확인 다이얼로그 */}
+      {confirmDeleteId && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/40"
+            style={{ animation: "pw-fade .15s ease" }}
+            onClick={() => !deleting && setConfirmDeleteId(null)}
+          />
+          <div
+            className="fixed left-1/2 top-1/2 z-50 w-[min(360px,90vw)] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white p-6 shadow-[0_8px_32px_rgba(0,0,0,0.18)]"
+            style={{ animation: "pw-fade .15s ease" }}
+          >
+            <div className="mb-1 text-[17px] font-bold text-ink">작품 삭제</div>
+            <div className="mb-5 text-[13px] leading-[1.6] text-muted">
+              「{confirmTitle}」을 삭제할까요?<br />삭제하면 모든 회차와 설정이 사라지고 되돌릴 수 없어요.
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setConfirmDeleteId(null)}
+                disabled={deleting}
+                className="h-11 flex-1 rounded border border-line2 bg-white text-sm font-bold text-ink2 transition hover:bg-canvas"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="h-11 flex-1 rounded border-none bg-error text-sm font-bold text-white transition hover:opacity-90 disabled:opacity-60"
+              >
+                {deleting ? "삭제 중..." : "삭제"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
-  );
-}
-
-function DemoSeg({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button onClick={onClick} className={"rounded-full px-3 py-[7px] text-[13px] font-bold transition " + (active ? "bg-brand text-white" : "bg-transparent text-muted")}>
-      {children}
-    </button>
   );
 }

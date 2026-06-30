@@ -58,8 +58,8 @@ export const router = createBrowserRouter([
         children: [
           { path: "create/world", handle: { step: 1 }, element: <Page><C0WorldWizard /></Page> },
           { path: "create", handle: { step: 2 }, element: <Page><C1SettingsWizard /></Page> },
-          { path: "create/narrative", handle: { step: 3 }, element: <Page><CNarrativeWizard /></Page> },
-          { path: "create/relations", handle: { step: 4 }, element: <Page><C2RelationshipBuilder /></Page> },
+          { path: "create/relations", handle: { step: 3 }, element: <Page><C2RelationshipBuilder /></Page> },
+          { path: "create/narrative", handle: { step: 4 }, element: <Page><CNarrativeWizard /></Page> },
           { path: "create/output", handle: { step: 5 }, element: <Page><COutputWizard /></Page> },
         ],
       },

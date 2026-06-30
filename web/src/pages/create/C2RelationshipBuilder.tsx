@@ -4,6 +4,8 @@ import { useToast } from "@/components/Toast";
 import { RadioPill } from "@/components/ui/RadioPill";
 import { useViewport } from "@/lib/useViewport";
 import { useCanvasDrag } from "@/lib/useCanvasDrag";
+import { useWizard } from "@/providers/WizardProvider";
+import { suggestRelations } from "@/lib/api";
 
 /* ── 타입 ────────────────────────────────────────────────────────────── */
 type Role = "lead" | "villain" | "support";
@@ -22,27 +24,57 @@ const ROLE_META: Record<Role, { border: string; cap: string; label: string }> = 
   support: { border: "2px solid #d8d8d8", cap: "#8a8a8a", label: "조연" },
 };
 
+function roleFromChar(role: string): "lead" | "villain" | "support" {
+  if (role === "protagonist") return "lead";
+  if (role === "villain") return "villain";
+  return "support";
+}
+
+function initNodesFromChars(chars: { name: string; role: string }[]): Node[] {
+  if (!chars.length) return [
+    { id: 1, name: "주인공", role: "lead", x: 300, y: 250 },
+  ];
+  const cx = 300, cy = 250, r = 160;
+  return chars.map((c, i) => {
+    const angle = (2 * Math.PI * i / chars.length) - Math.PI / 2;
+    return {
+      id: i + 1,
+      name: c.name || `인물 ${i + 1}`,
+      role: roleFromChar(c.role),
+      x: chars.length === 1 ? cx : Math.round(cx + r * Math.cos(angle)),
+      y: chars.length === 1 ? cy : Math.round(cy + r * Math.sin(angle)),
+    };
+  });
+}
+
 export default function C2RelationshipBuilder() {
   const { isMobile, isDesktop } = useViewport();
   const { showToast } = useToast();
   const navigate = useNavigate();
+  const { saveRelations, data: wizData } = useWizard();
 
-  const eid = useRef(2);
-  const tid = useRef(2);
+  const eid = useRef(Math.max(10, wizData.relationships.length + 10));
+  const tid = useRef(Math.max(10, ...wizData.relationships.flatMap((r) => r.timeline.map((_, j) => j + 11)), 10));
   const autoTimer = useRef<number | undefined>(undefined);
 
-  const [nodes, setNodes] = useState<Node[]>([
-    { id: 1, name: "카엘", role: "lead", x: 200, y: 250 },
-    { id: 2, name: "리나", role: "support", x: 470, y: 150 },
-    { id: 3, name: "제로드", role: "villain", x: 430, y: 380 },
-  ]);
-  const [edges, setEdges] = useState<Edge[]>([
-    { id: 1, from: 1, to: 2, relation: "연인", relationCustom: false, direction: "both", timeline: [
-      { id: 1, ep: 5, fromLabel: "동료", toLabel: "연인" },
-      { id: 2, ep: 12, fromLabel: "연인", toLabel: "원수" },
-    ] },
-    { id: 2, from: 1, to: 3, relation: "원수", relationCustom: false, direction: "both", timeline: [] },
-  ]);
+  const [nodes, setNodes] = useState<Node[]>(() => initNodesFromChars(wizData.characters));
+  const [edges, setEdges] = useState<Edge[]>(() => {
+    if (!wizData.relationships.length) return [];
+    const nodeList = initNodesFromChars(wizData.characters);
+    return wizData.relationships.flatMap((r, i) => {
+      const fn = nodeList.find((n) => n.name === r.fromChar);
+      const tn = nodeList.find((n) => n.name === r.toChar);
+      if (!fn || !tn) return [];
+      return [{
+        id: i + 11,
+        from: fn.id, to: tn.id,
+        relation: r.relation ?? "동료",
+        relationCustom: r.relation ? !RELATION_OPTIONS.includes(r.relation) : false,
+        direction: r.direction,
+        timeline: r.timeline.map((t, j) => ({ id: j + 11, ep: t.ep, fromLabel: t.fromLabel, toLabel: t.toLabel })),
+      }];
+    });
+  });
   const [selectedEdgeId, setSelectedEdgeId] = useState<number | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
   const [autoLoading, setAutoLoading] = useState(false);
@@ -106,22 +138,43 @@ export default function C2RelationshipBuilder() {
   const removeTimeline = (edgeId: number, tId: number) =>
     setEdges((es) => es.map((e) => (e.id !== edgeId ? e : { ...e, timeline: e.timeline.filter((t) => t.id !== tId) })));
 
-  const autoRecommend = () => {
+  const autoRecommend = async () => {
+    if (nodes.length < 2) { showToast("인물이 2명 이상 필요해요"); return; }
     setAutoLoading(true);
     clearSelection();
-    autoTimer.current = window.setTimeout(() => {
-      const ids = nodes.map((n) => n.id);
-      const [k, r, z] = ids;
-      const next: Edge[] = [];
-      if (k != null && r != null) next.push({ id: ++eid.current, from: k, to: r, relation: "연인", relationCustom: false, direction: "both", timeline: [
-        { id: ++tid.current, ep: 5, fromLabel: "동료", toLabel: "연인" },
-        { id: ++tid.current, ep: 12, fromLabel: "연인", toLabel: "원수" },
-      ] });
-      if (k != null && z != null) next.push({ id: ++eid.current, from: k, to: z, relation: "원수", relationCustom: false, direction: "both", timeline: [] });
-      setEdges(next);
-      setAutoLoading(false);
+    try {
+      const characters = nodes.map((n) => ({
+        name: n.name,
+        role: n.role === "lead" ? "protagonist" : n.role === "villain" ? "villain" : "supporting",
+        personality: wizData.characters.find((c) => c.name === n.name)?.personality ?? "",
+        trait: wizData.characters.find((c) => c.name === n.name)?.trait ?? "",
+        appearance: "",
+      }));
+      const res = await suggestRelations({
+        characters,
+        goal: wizData.goal,
+        conflict: wizData.conflict,
+        totalChapters: wizData.totalChapters,
+        storyFlow: wizData.storyFlow,
+      });
+      const newEdges: Edge[] = res.edges
+        .filter((e) => nodes[e.fromIndex] && nodes[e.toIndex])
+        .map((e) => ({
+          id: ++eid.current,
+          from: nodes[e.fromIndex].id,
+          to: nodes[e.toIndex].id,
+          relation: e.relation,
+          relationCustom: false,
+          direction: e.direction,
+          timeline: e.timeline.map((t) => ({ id: ++tid.current, ep: t.ep, fromLabel: t.fromLabel, toLabel: t.toLabel })),
+        }));
+      setEdges(newEdges);
       showToast("AI가 인물 관계를 추천했어요");
-    }, 1300);
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : "AI 생성 실패");
+    } finally {
+      setAutoLoading(false);
+    }
   };
 
   /* ── 파생 계산 ─────────────────────────────────────────────────────── */
@@ -300,16 +353,16 @@ export default function C2RelationshipBuilder() {
           {!isMobile && (
             <div className="mt-5 flex items-center justify-between gap-3.5">
               <button
-                onClick={() => navigate("/create/narrative")}
+                onClick={() => navigate("/create")}
                 className="h-14 rounded border border-line2 bg-white px-[22px] text-base font-bold text-ink2 transition hover:border-wash-2 hover:bg-wash hover:text-brand"
               >
-                ← 이전: 서사설정
+                ← 이전: 기본설정
               </button>
               <button
-                onClick={() => navigate("/create/output")}
+                onClick={() => { saveRelations(edges.map(e => { const fn = nodes.find(n => n.id === e.from); const tn = nodes.find(n => n.id === e.to); return { fromChar: fn?.name ?? "", toChar: tn?.name ?? "", relation: e.relation, direction: e.direction, timeline: e.timeline.map(t => ({ ep: t.ep, fromLabel: t.fromLabel, toLabel: t.toLabel })) }; })); navigate("/create/narrative"); }}
                 className="pw-btn-primary h-14 px-7 text-lg"
               >
-                다음: 출력설정 →
+                다음: 서사설정 →
               </button>
             </div>
           )}
@@ -348,8 +401,8 @@ export default function C2RelationshipBuilder() {
       {/* MOBILE fixed bar */}
       {isMobile && (
         <div className="fixed inset-x-0 bottom-0 z-30 flex items-center gap-2.5 border-t border-hairline bg-white px-4 py-3 shadow-[0_-2px_12px_rgba(0,0,0,0.04)]">
-          <button onClick={() => navigate("/create/narrative")} className="h-[54px] flex-shrink-0 rounded border border-line2 bg-white px-[18px] text-[15px] font-bold text-ink2">← 이전</button>
-          <button onClick={() => navigate("/create/output")} className="pw-btn-primary h-[54px] flex-1 text-base">다음: 출력설정 →</button>
+          <button onClick={() => navigate("/create")} className="h-[54px] flex-shrink-0 rounded border border-line2 bg-white px-[18px] text-[15px] font-bold text-ink2">← 이전</button>
+          <button onClick={() => { saveRelations(edges.map(e => { const fn = nodes.find(n => n.id === e.from); const tn = nodes.find(n => n.id === e.to); return { fromChar: fn?.name ?? "", toChar: tn?.name ?? "", relation: e.relation, direction: e.direction, timeline: e.timeline.map(t => ({ ep: t.ep, fromLabel: t.fromLabel, toLabel: t.toLabel })) }; })); navigate("/create/narrative"); }} className="pw-btn-primary h-[54px] flex-1 text-base">다음: 서사설정 →</button>
         </div>
       )}
 

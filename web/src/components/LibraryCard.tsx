@@ -20,13 +20,15 @@ type Props = {
   total: number;
   status: WorkStatus;
   variant?: number;
+  src?: string;
   onOpen?: () => void;
   onWrite?: () => void;
   onCover?: () => void;
   onSell?: () => void;
+  onDelete?: () => void;
 };
 
-export function LibraryCard({ title, genre, updated, done, total, status, variant = 0, onOpen, onWrite, onCover, onSell }: Props) {
+export function LibraryCard({ title, genre, updated, done, total, status, variant = 0, src, onOpen, onWrite, onCover, onSell, onDelete }: Props) {
   const meta = STATUS_META[status];
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
   const complete = done >= total;
@@ -34,10 +36,21 @@ export function LibraryCard({ title, genre, updated, done, total, status, varian
   return (
     <div className="overflow-hidden rounded-xl border border-hairline bg-white">
       {/* cover header */}
-      <button onClick={onOpen} className="relative block aspect-[16/9] w-full cursor-pointer border-none p-0" style={{ background: coverGradient(variant) }}>
+      <div className="relative aspect-[16/9] w-full" style={{ background: src ? undefined : coverGradient(variant) }}>
+        {src && <img src={src} alt={title} className="absolute inset-0 h-full w-full object-cover" />}
+        <button onClick={onOpen} className="absolute inset-0" aria-label={title + " 열기"} />
         <span className={"absolute left-2.5 top-2.5 rounded-full px-2.5 py-1 text-[11px] font-bold " + meta.cls}>{meta.label}</span>
         <span className="absolute bottom-2.5 right-2.5 rounded-full bg-black/40 px-2.5 py-1 text-[11px] font-bold text-white">{complete ? "완결" : `${done} / ${total}화`}</span>
-      </button>
+        {onDelete && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            className="absolute right-2 top-2 flex h-7 w-7 items-center justify-center rounded-full bg-black/40 text-[15px] text-white/80 backdrop-blur-[2px] transition hover:bg-black/70 hover:text-white"
+            aria-label="삭제"
+          >
+            ×
+          </button>
+        )}
+      </div>
 
       {/* body */}
       <div className="p-4">

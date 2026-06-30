@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { HybridSelect } from "@/components/HybridSelect";
 import { useToast } from "@/components/Toast";
 import { useViewport } from "@/lib/useViewport";
+import { useWizard } from "@/providers/WizardProvider";
+import { suggestNarrative } from "@/lib/api";
 
 type Hybrid = { value: string; custom: boolean; text: string };
 const hybridVal = (f: Hybrid) => (f.custom ? f.text.trim() : f.value);
@@ -19,33 +21,100 @@ const STAGE_META = [
 ] as const;
 type StageKey = (typeof STAGE_META)[number]["key"];
 
-const AI_STAGES: Record<StageKey, string> = {
-  ki: "처형대에서 눈을 감은 카엘이 10년 전, 모든 것을 잃기 전으로 회귀한다. 아직 무너지지 않은 가문과 살아있는 사람들을 마주한다.",
-  seung: "회귀자의 지식으로 배신자들의 음모를 하나씩 파악하며 힘을 키운다. 과거의 동료를 다시 만나지만 신뢰의 균열이 시작된다.",
-  jeon: "믿었던 이의 두 번째 배신으로 계획이 무너지고, 카엘은 복수와 사람을 지키는 일 사이에서 선택을 강요받는다.",
-  gyeol: "황혼이 내리기 전, 카엘은 가장 차가운 검으로 원흉을 베고 비극의 고리를 끊는다. 같은 실수는 반복되지 않는다.",
-};
 
 export default function CNarrativeWizard() {
   const { isMobile, isDesktop } = useViewport();
   const { showToast } = useToast();
   const navigate = useNavigate();
-  const aiT = useRef<number | undefined>(undefined);
+  const { saveNarrative, data: wizData } = useWizard();
 
-  const [goal, setGoal] = useState<Hybrid>({ value: "복수", custom: false, text: "" });
-  const [conflict, setConflict] = useState<Hybrid>({ value: "인물 대 인물", custom: false, text: "" });
-  const [ending, setEnding] = useState<Hybrid>({ value: "복수 완성", custom: false, text: "" });
-  const [synopsis, setSynopsis] = useState("처형당한 검사가 10년 전으로 회귀해 복수한다");
-  const [stages, setStages] = useState<Record<StageKey, string>>({ ki: "", seung: "", jeon: "", gyeol: "" });
+  const [goal, setGoal] = useState<Hybrid>(() => {
+    if (!wizData.goal) return { value: "", custom: false, text: "" };
+    return GOAL_OPTS.includes(wizData.goal) ? { value: wizData.goal, custom: false, text: "" } : { value: "", custom: true, text: wizData.goal };
+  });
+  const [conflict, setConflict] = useState<Hybrid>(() => {
+    if (!wizData.conflict) return { value: "", custom: false, text: "" };
+    return CONFLICT_OPTS.includes(wizData.conflict) ? { value: wizData.conflict, custom: false, text: "" } : { value: "", custom: true, text: wizData.conflict };
+  });
+  const [ending, setEnding] = useState<Hybrid>(() => {
+    if (!wizData.ending) return { value: "", custom: false, text: "" };
+    return ENDING_OPTS.includes(wizData.ending) ? { value: wizData.ending, custom: false, text: "" } : { value: "", custom: true, text: wizData.ending };
+  });
+  const [synopsis, setSynopsis] = useState("");
+  const [stages, setStages] = useState<Record<StageKey, string>>(() => ({
+    ki: wizData.storyFlow["발단"] || "",
+    seung: wizData.storyFlow["전개"] || "",
+    jeon: wizData.storyFlow["위기"] || "",
+    gyeol: wizData.storyFlow["절정"] || "",
+  }));
   const [aiLoading, setAiLoading] = useState(false);
+
+  // 감정 목표 & 레퍼런스
+  const [emotionalGoal, setEmotionalGoal] = useState(wizData.emotionalGoal ?? "");
+  const [referenceWork, setReferenceWork] = useState(wizData.referenceWork ?? "");
+  const [cliffhangerStyle, setCliffhangerStyle] = useState(wizData.cliffhangerStyle ?? "");
+
+  // 복선 계획
+  const fsId = useRef(0);
+  const [foreshadowing, setForeshadowing] = useState<{ id: number; hint: string; revealChapter: string }[]>(
+    () => (wizData.foreshadowing ?? []).map((f) => ({ id: ++fsId.current, hint: f.hint, revealChapter: String(f.revealChapter) }))
+  );
+  const addFs = () => setForeshadowing((s) => [...s, { id: ++fsId.current, hint: "", revealChapter: "" }]);
+  const patchFs = (id: number, patch: { hint?: string; revealChapter?: string }) =>
+    setForeshadowing((s) => s.map((f) => (f.id === id ? { ...f, ...patch } : f)));
+  const removeFs = (id: number) => setForeshadowing((s) => s.filter((f) => f.id !== id));
+
+  // 회차 패턴
+  const [chapterRhythm, setChapterRhythm] = useState({
+    eventEveryN: wizData.chapterRhythm?.eventEveryN ?? "",
+    maxOpenThreads: wizData.chapterRhythm?.maxOpenThreads ?? "",
+    note: wizData.chapterRhythm?.note ?? "",
+  });
+  const patchRhythm = (patch: Partial<typeof chapterRhythm>) => setChapterRhythm((s) => ({ ...s, ...patch }));
 
   const goalV = hybridVal(goal), conflictV = hybridVal(conflict), endingV = hybridVal(ending);
   const stagesFilled = STAGE_META.every((m) => stages[m.key].trim());
   const valid = !!goalV && !!conflictV && !!endingV && stagesFilled;
 
-  const aiSuggest = () => {
+  const collectNarrative = () => ({
+    goal: goalV,
+    conflict: conflictV,
+    storyFlow: { 발단: stages.ki, 전개: stages.seung, 위기: stages.jeon, 절정: stages.gyeol },
+    ending: endingV,
+    emotionalGoal,
+    referenceWork,
+    cliffhangerStyle,
+    foreshadowing: foreshadowing.filter(f => f.hint.trim()).map(f => ({ hint: f.hint.trim(), revealChapter: parseInt(f.revealChapter) || 0 })),
+    chapterRhythm: { eventEveryN: chapterRhythm.eventEveryN, maxOpenThreads: chapterRhythm.maxOpenThreads, note: chapterRhythm.note },
+  });
+
+  const aiSuggest = async () => {
     setAiLoading(true);
-    aiT.current = window.setTimeout(() => { setStages(AI_STAGES); setAiLoading(false); showToast("AI가 4단 구조를 제안했어요"); }, 1400);
+    try {
+      const res = await suggestNarrative({
+        era: wizData.era,
+        genres: wizData.genres,
+        goal: hybridVal(goal),
+        conflict: hybridVal(conflict),
+        ending: hybridVal(ending),
+        emotionalGoal: emotionalGoal || undefined,
+        referenceWork: referenceWork || undefined,
+        synopsis: synopsis || undefined,
+        characters: wizData.characters.map(c => c.name),
+        worldRules: wizData.worldRules,
+        relationships: wizData.relationships.map(r => ({
+          fromChar: r.fromChar,
+          toChar: r.toChar,
+          relation: r.relation ?? "",
+        })),
+      });
+      setStages({ ki: res.ki, seung: res.seung, jeon: res.jeon, gyeol: res.gyeol });
+      showToast("AI가 4단 구조를 제안했어요");
+    } catch (e: unknown) {
+      showToast(e instanceof Error ? e.message : "AI 생성 실패");
+    } finally {
+      setAiLoading(false);
+    }
   };
 
   return (
@@ -56,7 +125,7 @@ export default function CNarrativeWizard() {
         <div className="min-w-0 flex-1">
           <div className="mb-5">
             <div className="text-2xl font-bold tracking-[-0.4px] text-ink">서사 설정</div>
-            <div className="mt-1 text-sm text-muted">2단계 · 이야기의 뼈대를 잡아요. 한 줄만 적으면 AI가 4단 구조를 제안해요.</div>
+            <div className="mt-1 text-sm text-muted">목표·결말·복선을 모두 채운 뒤 AI가 기승전결을 완성해요.</div>
           </div>
 
           {/* 목표 + 갈등 */}
@@ -73,17 +142,159 @@ export default function CNarrativeWizard() {
             </HybridSelect>
           </div>
 
-          {/* 기승전결 */}
+          {/* 결말 방향 */}
+          <div className="pw-card mb-4 p-6">
+            <HybridSelect label="결말 방향" required error={!endingV} custom={ending.custom} onToggleCustom={() => setEnding((f) => ({ ...f, custom: !f.custom }))} value={ending.custom ? ending.text : ending.value} onChange={(v) => setEnding((f) => (f.custom ? { ...f, text: v } : { ...f, value: v }))} customPlaceholder="예: 주인공의 희생으로 세계가 재건된다" height={48}>
+              <option value="">선택</option>
+              {ENDING_OPTS.map((o) => <option key={o} value={o}>{o}</option>)}
+            </HybridSelect>
+          </div>
+
+          {/* 감정 목표 & 레퍼런스 */}
+          <div className="pw-card mb-4 p-6">
+            <div className="mb-1.5 text-sm font-bold text-ink">감정 목표 & 레퍼런스 <span className="text-[13px] font-normal text-muted">선택</span></div>
+            <div className="mb-4 text-[13px] text-muted">독자가 느끼길 바라는 감정과 참고할 작품 분위기를 기록해 두면 회차마다 일관된 톤이 유지돼요.</div>
+
+            <div className="mb-4">
+              <div className="mb-2 pw-field-label">독자 감정 목표</div>
+              <div className="flex flex-wrap gap-2">
+                {["통쾌함", "설렘", "슬픔", "공포", "긴장감", "감동"].map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => setEmotionalGoal((v) => (v === opt ? "" : opt))}
+                    className={"h-9 rounded-full border px-4 text-sm font-bold transition " + (emotionalGoal === opt ? "border-brand bg-brand text-white" : "border-line2 text-ink2 hover:border-brand hover:text-brand")}
+                  >
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <div className="mb-1.5 pw-field-label">참고 작품·분위기</div>
+              <input
+                value={referenceWork}
+                onChange={(e) => setReferenceWork(e.target.value)}
+                placeholder='예: "전지적 독자 시점" 같은 묵직한 서사, 나루토 성장 서사'
+                className="pw-input text-[15px]"
+              />
+            </div>
+
+            <div>
+              <div className="mb-2 pw-field-label">클리프행어 스타일</div>
+              <div className="flex flex-wrap gap-2">
+                {["반전형", "의문형", "감정형", "행동형"].map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => setCliffhangerStyle((v) => (v === opt ? "" : opt))}
+                    className={"h-9 rounded-full border px-4 text-sm font-bold transition " + (cliffhangerStyle === opt ? "border-brand bg-brand text-white" : "border-line2 text-ink2 hover:border-brand hover:text-brand")}
+                  >
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* 복선 계획표 */}
+          <div className="pw-card mb-4 p-6">
+            <div className="mb-1.5 flex items-center justify-between">
+              <div className="text-sm font-bold text-ink">복선 계획표 <span className="text-[13px] font-normal text-muted">선택</span></div>
+              <button type="button" onClick={addFs} className="pw-btn-slight h-[34px] px-3 text-[13px]">+ 복선 추가</button>
+            </div>
+            <div className="mb-3 text-[13px] text-muted">심어야 할 복선과 회수 예정 회차를 적어두면 AI가 해당 회차 전에 복선을 자연스럽게 심어요.</div>
+
+            {foreshadowing.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-line2 p-4 text-center text-[13px] text-muted">복선이 없어요. 추가 버튼으로 복선을 계획해 보세요.</div>
+            ) : (
+              <div className="space-y-2.5">
+                {foreshadowing.map((f, i) => (
+                  <div key={f.id} className="flex items-center gap-2.5">
+                    <span className="w-5 flex-shrink-0 text-center text-[13px] font-bold text-muted">{i + 1}</span>
+                    <input
+                      value={f.hint}
+                      onChange={(e) => patchFs(f.id, { hint: e.target.value })}
+                      placeholder='예: 주인공의 왼쪽 눈이 가끔 떨린다'
+                      className="h-11 min-w-0 flex-1 rounded border border-hairline px-3 text-[15px] text-ink outline-none transition focus:border-brand focus:shadow-focus"
+                    />
+                    <div className="flex flex-shrink-0 items-center gap-1.5">
+                      <input
+                        type="number"
+                        value={f.revealChapter}
+                        onChange={(e) => patchFs(f.id, { revealChapter: e.target.value })}
+                        min={1}
+                        placeholder="회차"
+                        className="h-11 w-[72px] rounded border border-hairline px-2.5 text-center text-[15px] text-ink outline-none transition focus:border-brand focus:shadow-focus"
+                      />
+                      <span className="text-[13px] text-muted">화</span>
+                    </div>
+                    <button type="button" onClick={() => removeFs(f.id)} className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded text-muted transition hover:bg-error-wash hover:text-error">×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 회차 패턴·리듬 */}
+          <div className="pw-card mb-4 p-6">
+            <div className="mb-1.5 text-sm font-bold text-ink">회차 패턴·리듬 <span className="text-[13px] font-normal text-muted">선택</span></div>
+            <div className="mb-4 text-[13px] text-muted">사건 밀도와 동시 열린 복선 수를 제한해 회차마다 일정한 속도감을 유지해요.</div>
+
+            <div className="grid gap-4" style={{ gridTemplateColumns: isDesktop ? "1fr 1fr" : "1fr" }}>
+              <div>
+                <div className="mb-1.5 pw-field-label">이벤트 주기 <span className="font-normal text-muted">(매 N화마다 큰 사건)</span></div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[14px] text-muted">매</span>
+                  <input
+                    type="number"
+                    value={chapterRhythm.eventEveryN}
+                    onChange={(e) => patchRhythm({ eventEveryN: e.target.value })}
+                    min={1}
+                    placeholder="5"
+                    className="h-11 w-[72px] rounded border border-hairline px-2.5 text-center text-[15px] text-ink outline-none transition focus:border-brand focus:shadow-focus"
+                  />
+                  <span className="text-[14px] text-muted">화마다 큰 사건</span>
+                </div>
+              </div>
+              <div>
+                <div className="mb-1.5 pw-field-label">동시 열린 복선 최대</div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={chapterRhythm.maxOpenThreads}
+                    onChange={(e) => patchRhythm({ maxOpenThreads: e.target.value })}
+                    min={1}
+                    placeholder="3"
+                    className="h-11 w-[72px] rounded border border-hairline px-2.5 text-center text-[15px] text-ink outline-none transition focus:border-brand focus:shadow-focus"
+                  />
+                  <span className="text-[14px] text-muted">개 이내</span>
+                </div>
+              </div>
+            </div>
+            <div className="mt-4">
+              <div className="mb-1.5 pw-field-label">기타 메모</div>
+              <input
+                value={chapterRhythm.note}
+                onChange={(e) => patchRhythm({ note: e.target.value })}
+                placeholder='예: 홀수 회차는 액션, 짝수 회차는 감정 회수로 교차 배치'
+                className="pw-input text-[15px]"
+              />
+            </div>
+          </div>
+
+          {/* 기승전결 — 위 항목 모두 채운 뒤 AI 자동생성 */}
           <div className="pw-card mb-4 p-6">
             <div className="mb-1.5 flex items-center gap-1.5">
               <span className="text-sm font-bold text-ink">스토리 큰 흐름 (기승전결)</span>
               <span className="text-sm font-bold text-brand">*</span>
             </div>
-            <div className="mb-3.5 text-[13px] text-muted">한 줄 시놉시스만 적고 AI 제안을 받거나, 4단계를 직접 채워도 좋아요.</div>
+            <div className="mb-3.5 text-[13px] text-muted">위 항목을 다 채웠다면 AI 자동생성으로 기승전결을 완성하세요. 직접 작성해도 좋아요.</div>
 
-            {/* AI synopsis */}
+            {/* AI 자동생성 */}
             <div className="mb-[18px] rounded-lg border border-wash-border bg-wash p-4">
-              <div className="mb-2 text-[13px] font-bold text-ink">한 줄 시놉시스</div>
+              <div className="mb-2 text-[13px] font-bold text-ink">한 줄 시놉시스 <span className="font-normal text-muted">(선택 — 없으면 위 설정을 참고해요)</span></div>
               <div className="flex flex-wrap gap-2.5">
                 <input value={synopsis} onChange={(e) => setSynopsis(e.target.value)} placeholder="예: 처형당한 검사가 10년 전으로 회귀해 복수한다" className="h-[46px] min-w-[200px] flex-1 rounded border border-wash-2 bg-white px-3.5 text-[15px] text-ink outline-none transition focus:border-brand focus:shadow-focus" />
                 {aiLoading ? (
@@ -114,21 +325,13 @@ export default function CNarrativeWizard() {
             </div>
           </div>
 
-          {/* 결말 방향 */}
-          <div className="pw-card mb-4 p-6">
-            <HybridSelect label="결말 방향" required error={!endingV} custom={ending.custom} onToggleCustom={() => setEnding((f) => ({ ...f, custom: !f.custom }))} value={ending.custom ? ending.text : ending.value} onChange={(v) => setEnding((f) => (f.custom ? { ...f, text: v } : { ...f, value: v }))} customPlaceholder="예: 주인공의 희생으로 세계가 재건된다" height={48}>
-              <option value="">선택</option>
-              {ENDING_OPTS.map((o) => <option key={o} value={o}>{o}</option>)}
-            </HybridSelect>
-          </div>
-
           {/* DESKTOP nav */}
           {!isMobile && (
             <div className="mt-1 flex items-center justify-between gap-3.5">
-              <button onClick={() => navigate("/create")} className="h-14 rounded border border-line2 bg-white px-[22px] text-base font-bold text-ink2 transition hover:border-wash-2 hover:bg-wash hover:text-brand">← 이전: 기본설정</button>
+              <button onClick={() => navigate("/create/relations")} className="h-14 rounded border border-line2 bg-white px-[22px] text-base font-bold text-ink2 transition hover:border-wash-2 hover:bg-wash hover:text-brand">← 이전: 관계도</button>
               <div className="flex items-center gap-3.5">
                 {!valid && <span className="text-[13px] font-bold text-muted">필수 항목(*)을 채우면 다음으로 넘어갈 수 있어요.</span>}
-                <button disabled={!valid} onClick={() => navigate("/create/relations")} className={(valid ? "pw-btn-primary" : "pw-btn-disabled") + " h-14 px-7 text-lg"}>다음: 관계도 →</button>
+                <button disabled={!valid} onClick={() => { saveNarrative(collectNarrative()); navigate("/create/output"); }} className={(valid ? "pw-btn-primary" : "pw-btn-disabled") + " h-14 px-7 text-lg"}>다음: 출력설정 →</button>
               </div>
             </div>
           )}
@@ -174,8 +377,8 @@ export default function CNarrativeWizard() {
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-hairline bg-white px-4 py-3 shadow-[0_-2px_12px_rgba(0,0,0,0.04)]">
           {!valid && <div className="mb-2 text-center text-xs font-bold text-muted">필수 항목(*)을 채워주세요</div>}
           <div className="flex gap-2.5">
-            <button onClick={() => navigate("/create")} className="h-[54px] flex-shrink-0 rounded border border-line2 bg-white px-[18px] text-[15px] font-bold text-ink2">← 이전</button>
-            <button disabled={!valid} onClick={() => navigate("/create/relations")} className={(valid ? "pw-btn-primary" : "pw-btn-disabled") + " h-[54px] flex-1 text-base"}>다음: 관계도 →</button>
+            <button onClick={() => navigate("/create/relations")} className="h-[54px] flex-shrink-0 rounded border border-line2 bg-white px-[18px] text-[15px] font-bold text-ink2">← 이전</button>
+            <button disabled={!valid} onClick={() => { saveNarrative(collectNarrative()); navigate("/create/output"); }} className={(valid ? "pw-btn-primary" : "pw-btn-disabled") + " h-[54px] flex-1 text-base"}>다음: 출력설정 →</button>
           </div>
         </div>
       )}

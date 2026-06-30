@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useToast } from "@/components/Toast";
 import { AuthShell } from "@/components/AuthShell";
+import { supabase } from "@/lib/supabase";
 
 /** 계정 찾기 — 아이디 찾기 / 비밀번호 재설정 (탭). */
 export default function AFindAccount({ initial = "id" }: { initial?: "id" | "pw" }) {
@@ -55,40 +56,46 @@ function FindId({ onToast, onDone }: { onToast: (m: string) => void; onDone: () 
 
 /* ── 비밀번호 재설정 ───────────────────────────────────────────────────── */
 function FindPw({ onToast, onDone }: { onToast: (m: string) => void; onDone: () => void }) {
-  const [stage, setStage] = useState<"verify" | "reset">("verify");
+  const [stage, setStage] = useState<"verify" | "sent">("verify");
   const [email, setEmail] = useState("");
-  const [phone, setPhone] = useState("");
-  const [pw, setPw] = useState("");
-  const [pw2, setPw2] = useState("");
-  const verifyOk = email.trim() && phone.trim();
-  const mismatch = !!pw2 && pw !== pw2;
-  const resetOk = pw.trim() && pw === pw2;
+  const [sending, setSending] = useState(false);
+  const verifyOk = email.trim().includes("@");
 
-  if (stage === "reset") {
+  const sendReset = async () => {
+    if (!verifyOk || sending) return;
+    setSending(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    setSending(false);
+    if (error) {
+      onToast("이메일 전송에 실패했어요: " + error.message);
+    } else {
+      setStage("sent");
+    }
+  };
+
+  if (stage === "sent") {
     return (
-      <div style={{ animation: "pw-fade .25s ease" }}>
-        <div className="mb-1.5 text-xl font-bold text-ink">새 비밀번호 설정</div>
-        <div className="mb-[22px] text-sm leading-[1.5] text-muted">사용할 새 비밀번호를 입력해 주세요.</div>
-        <div className="flex flex-col gap-4">
-          <Field label="새 비밀번호"><input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="8자 이상" className="pw-input h-[50px] text-[15px]" /></Field>
-          <Field label="새 비밀번호 확인">
-            <input type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} placeholder="재입력" className={"pw-input h-[50px] text-[15px]" + (mismatch ? " pw-input--err" : "")} />
-            {mismatch && <div className="mt-1.5 text-[13px] font-bold text-error">비밀번호가 일치하지 않아요.</div>}
-          </Field>
-        </div>
-        <button disabled={!resetOk} onClick={() => { onToast("비밀번호가 변경됐어요"); onDone(); }} className={"mt-6 h-[54px] w-full rounded border-none text-base font-bold transition " + (resetOk ? "bg-brand text-white hover:bg-brand-hover" : "cursor-default bg-hairline text-[#b4b4b4]")}>비밀번호 변경</button>
+      <div className="text-center" style={{ animation: "pw-fade .25s ease" }}>
+        <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-wash text-2xl font-bold text-brand">✉</div>
+        <div className="mb-1.5 text-lg font-bold text-ink">이메일을 확인해 주세요</div>
+        <div className="mb-3 text-sm leading-[1.6] text-muted">비밀번호 재설정 링크를 <span className="font-bold text-ink">{email}</span>로 보냈어요. 링크를 클릭하면 새 비밀번호를 설정할 수 있어요.</div>
+        <button onClick={onDone} className="h-[52px] w-full rounded border-none bg-brand text-base font-bold text-white transition hover:bg-brand-hover">로그인 화면으로</button>
       </div>
     );
   }
+
   return (
     <div style={{ animation: "pw-fade .25s ease" }}>
       <div className="mb-1.5 text-xl font-bold text-ink">비밀번호 찾기</div>
-      <div className="mb-[22px] text-sm leading-[1.5] text-muted">가입한 이메일과 휴대폰으로 본인 확인 후 재설정해요.</div>
+      <div className="mb-[22px] text-sm leading-[1.5] text-muted">가입한 이메일로 재설정 링크를 보내드려요.</div>
       <div className="flex flex-col gap-4">
         <Field label="이메일 (아이디)"><input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" className="pw-input h-[50px] text-[15px]" /></Field>
-        <Field label="휴대폰 번호"><input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="010-0000-0000" className="pw-input h-[50px] text-[15px]" /></Field>
       </div>
-      <button disabled={!verifyOk} onClick={() => { setStage("reset"); onToast("본인 확인이 완료됐어요"); }} className={"mt-6 h-[54px] w-full rounded border-none text-base font-bold transition " + (verifyOk ? "bg-brand text-white hover:bg-brand-hover" : "cursor-default bg-hairline text-[#b4b4b4]")}>본인 확인</button>
+      <button disabled={!verifyOk || sending} onClick={sendReset} className={"mt-6 h-[54px] w-full rounded border-none text-base font-bold transition " + (verifyOk && !sending ? "bg-brand text-white hover:bg-brand-hover" : "cursor-default bg-hairline text-[#b4b4b4]")}>
+        {sending ? "전송 중..." : "재설정 링크 받기"}
+      </button>
     </div>
   );
 }

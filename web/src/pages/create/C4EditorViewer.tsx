@@ -1,40 +1,55 @@
-import { useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import { useToast } from "@/components/Toast";
 import { useViewport } from "@/lib/useViewport";
+import { useWizard } from "@/providers/WizardProvider";
+import { generateChapter, getNovel, listChapters, updateChapter } from "@/lib/api";
 
 type Chapter = { id: number; num: number; title: string; body: string };
 type Mode = "read" | "edit";
-
-const INITIAL: Chapter[] = [
-  {
-    id: 1, num: 1, title: "회귀",
-    body:
-      "눈을 떴을 때, 카엘은 10년 전으로 돌아와 있었다. 처형대의 차가운 감촉 대신, 손끝에 닿는 것은 낡은 침상의 거친 천이었다.\n\n창밖에서는 새벽 종소리가 울렸다. 그가 마지막으로 들었던 소리는 군중의 환호와, 목을 겨눈 칼날의 울림이었는데.\n\n“……다시.” 카엘은 제 손을 내려다보았다. 흉터 하나 없는, 열일곱의 손이었다. 아직 아무도 죽지 않았고, 아직 아무것도 빼앗기지 않은 시간이었다.\n\n그는 천천히 숨을 골랐다. 분노로 떨던 심장이, 이번에는 차갑게 가라앉았다. 복수는 충동이 아니라 설계여야 했다.\n\n멀리 성의 첨탑 위로 붉은 깃발이 펄럭였다. 제로드의 문장이었다. 카엘은 입꼬리를 올렸다. 이번 생에는, 저 깃발을 내 손으로 끌어내린다.",
-  },
-  {
-    id: 2, num: 2, title: "첫 번째 균열",
-    body:
-      "리나가 그를 알아본 것은 우연이 아니었다. 같은 새벽, 같은 꿈에서 깨어난 사람의 눈빛은 숨길 수 없는 법이다.\n\n“너도… 돌아왔구나.” 그녀의 목소리가 가늘게 떨렸다. 카엘은 대답 대신 손을 내밀었다. 이번에는, 같은 편에서 시작하기로 했다.",
-  },
-  {
-    id: 3, num: 3, title: "옛 맹세",
-    body:
-      "맹세는 십 년 전에 깨졌고, 십 년 뒤에 다시 쓰였다. 카엘은 옛 동료의 무덤 앞에서 오래 서 있었다.\n\n“아직 늦지 않았어.” 그는 흙을 한 줌 쥐었다가 천천히 놓았다. 이번에는 누구도 이 자리에 묻지 않겠다고, 그렇게 다짐했다.",
-  },
-];
 
 export default function C4EditorViewer() {
   const { isMobile, isDesktop } = useViewport();
   const { showToast } = useToast();
   const navigate = useNavigate();
-  const cid = useRef(3);
-  const regenT = useRef<number | undefined>(undefined);
-  const genT = useRef<number | undefined>(undefined);
+  const { id: novelId } = useParams<{ id: string }>();
+  const { data: wizData, reset } = useWizard();
 
-  const [chapters, setChapters] = useState<Chapter[]>(INITIAL);
+  const chapterBody = wizData.chapterContent ?? "";
+  const [localTitle, setLocalTitle] = useState("");
+  const novelTitle = wizData.title || localTitle || "무제";
+  const cid = useRef(1);
+
+  const [chapters, setChapters] = useState<Chapter[]>([
+    { id: 1, num: 1, title: "1화", body: chapterBody || "" },
+  ]);
+
+  // DB에서 전체 회차 및 제목 로드
+  useEffect(() => {
+    if (!novelId) return;
+    if (!wizData.title) {
+      getNovel(novelId).then(n => setLocalTitle(n.title)).catch(() => {});
+    }
+    listChapters(novelId)
+      .then((chs) => {
+        if (chs.length === 0) return;
+        const sorted = chs.sort((a, b) => a.seq - b.seq);
+        setChapters(sorted.map((c) => ({
+          id: c.seq,
+          num: c.seq,
+          title: `${c.seq}화`,
+          // 1화는 wizData 메모리(방금 생성한 경우) 우선, 없으면 DB 내용
+          body: c.seq === 1 && chapterBody ? chapterBody : c.content,
+        })));
+        cid.current = sorted[sorted.length - 1].seq;
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [currentId, setCurrentId] = useState(1);
   const [mode, setMode] = useState<Mode>("read");
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
   const [regenerating, setRegenerating] = useState(false);
   const [generatingNext, setGeneratingNext] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -43,8 +58,22 @@ export default function C4EditorViewer() {
   const cur = chapters.find((c) => c.id === currentId) ?? chapters[0];
 
   const selectChapter = (id: number) => { setCurrentId(id); setMode("read"); setDrawerOpen(false); };
+
+  const saveCurrentChapter = async () => {
+    if (!novelId || saving) return;
+    setSaving(true);
+    try {
+      await updateChapter(novelId, cur.num, cur.body);
+      setSavedAt(Date.now());
+    } catch {
+      showToast("저장에 실패했어요");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const switchMode = (m: Mode) => {
-    if (mode === "edit" && m === "read") showToast("저장됨");
+    if (mode === "edit" && m === "read") saveCurrentChapter();
     setMode(m);
   };
   const partialEdit = () => { setMode("edit"); showToast("편집 모드예요. 문장을 직접 다듬어 보세요"); };
@@ -52,22 +81,39 @@ export default function C4EditorViewer() {
   const onBodyChange = (val: string) => {
     setChapters((cs) => cs.map((c) => (c.id === currentId ? { ...c, body: val } : c)));
     setContribution((v) => Math.min(100, v + 2));
+    setSavedAt(null);
   };
 
-  const regenerate = () => {
-    if (regenerating) return;
+  const regenerate = async () => {
+    if (regenerating || !novelId) { if (!novelId) showToast("작품 ID가 없어요. 다시 생성해주세요."); return; }
     setRegenerating(true); setMode("read");
-    regenT.current = window.setTimeout(() => { setRegenerating(false); showToast("이 회차를 다시 생성했어요"); }, 1500);
+    try {
+      const res = await generateChapter(novelId, cur.num);
+      setChapters((cs) => cs.map((c) => (c.id === currentId ? { ...c, body: res.content } : c)));
+      setSavedAt(Date.now());
+      showToast("이 회차를 다시 생성했어요");
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "재생성 실패");
+    } finally {
+      setRegenerating(false);
+    }
   };
-  const generateNext = () => {
-    if (generatingNext) return;
+  const generateNext = async () => {
+    if (generatingNext || !novelId) { if (!novelId) showToast("작품 ID가 없어요. 다시 생성해주세요."); return; }
     setGeneratingNext(true); setDrawerOpen(false);
-    genT.current = window.setTimeout(() => {
+    const nextNum = chapters.length + 1;
+    try {
+      const res = await generateChapter(novelId, nextNum);
       const id = ++cid.current;
-      setChapters((cs) => [...cs, { id, num: cs.length + 1, title: "새 회차", body: "새 회차의 첫 문장이 화면 위로 흘러내렸다. 카엘의 이야기는 아직 끝나지 않았다.\n\n(AI가 생성한 본문 예시예요 — [부분 수정]과 [재생성]으로 마음껏 다듬어 보세요.)" }]);
-      setCurrentId(id); setMode("read"); setGeneratingNext(false);
+      setChapters((cs) => [...cs, { id, num: nextNum, title: `${nextNum}화`, body: res.content }]);
+      setCurrentId(id); setMode("read");
+      setSavedAt(Date.now());
       showToast("다음 회차를 생성했어요");
-    }, 1600);
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : "회차 생성 실패");
+    } finally {
+      setGeneratingNext(false);
+    }
   };
 
   const isRead = mode === "read";
@@ -107,15 +153,17 @@ export default function C4EditorViewer() {
       <div className="sticky top-0 z-[25] flex h-16 items-center justify-between gap-3 border-b border-hairline bg-white px-[18px]">
         <div className="flex min-w-0 items-center gap-2">
           {isMobile && (
-            <button onClick={() => setDrawerOpen(true)} className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded text-xl text-ink hover:bg-wash">≡</button>
+            <button onClick={() => setDrawerOpen(true)} className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded text-xl text-ink hover:bg-wash">=</button>
           )}
-          <button onClick={() => navigate("/library")} className="pw-btn-ghost h-[38px] flex-shrink-0 px-2.5 text-sm">← 작업실</button>
-          <div className="truncate text-base font-bold text-ink">「회귀한 검, 황혼을 베다」</div>
+          <button onClick={async () => { if (mode === "edit") await saveCurrentChapter(); reset(); navigate("/library"); }} className="pw-btn-ghost h-[38px] flex-shrink-0 px-2.5 text-sm">← 작업실</button>
+          <div className="truncate text-base font-bold text-ink">{novelTitle}</div>
+          {saving && <span className="hidden text-xs text-muted sm:block">저장 중...</span>}
+          {savedAt && !saving && <span className="hidden text-xs font-bold text-[#2f8f5b] sm:block">✓ 저장됨</span>}
         </div>
         {!isMobile && (
           <div className="flex flex-shrink-0 gap-2">
-            <button onClick={() => navigate("/works/1/cover")} className="pw-btn-slight h-10 px-3.5 text-sm">표지 만들기</button>
-            <button onClick={() => navigate("/seller/register")} className="pw-btn-primary h-10 px-4 text-sm">판매등록</button>
+            <button onClick={() => navigate(`/works/${novelId}/cover`)} className="pw-btn-slight h-10 px-3.5 text-sm">표지 만들기</button>
+            <button onClick={() => navigate("/seller/register", { state: { novelId, title: novelTitle } })} className="pw-btn-primary h-10 px-4 text-sm">판매등록</button>
           </div>
         )}
       </div>
@@ -148,7 +196,7 @@ export default function C4EditorViewer() {
               <div className="h-2 w-full overflow-hidden rounded-full bg-hairline">
                 <div className="h-full rounded-full bg-brand transition-[width] duration-300" style={{ width: `${pct}%` }} />
               </div>
-              <div className="mt-2.5 text-xs leading-normal text-muted">판매하려면 직접 편집이 필요해요. 문장을 다듬을수록 게이지가 채워지고 ‘AI 보조’로 바뀌어요.</div>
+              <div className="mt-2.5 text-xs leading-normal text-muted">판매하려면 직접 편집이 필요해요. 문장을 다듬을수록 게이지가 채워지고 AI 보조로 바뀌어요.</div>
             </div>
 
             {/* chapter header + mode toggle */}
@@ -187,8 +235,8 @@ export default function C4EditorViewer() {
             {/* actions */}
             <div className="mt-7 flex flex-wrap items-center justify-between gap-3 border-t border-hairline pt-5">
               <div className="flex flex-wrap gap-2">
-                <button onClick={partialEdit} className="inline-flex h-11 items-center gap-1.5 rounded border border-line2 bg-white px-4 text-sm font-bold text-ink2 transition hover:border-brand hover:bg-canvas hover:text-brand">✎ 부분 수정</button>
-                <button onClick={regenerate} className="inline-flex h-11 items-center gap-1.5 rounded border border-line2 bg-white px-4 text-sm font-bold text-ink2 transition hover:border-brand hover:bg-canvas hover:text-brand">↻ 이 회차 재생성</button>
+                <button onClick={partialEdit} className="inline-flex h-11 items-center gap-1.5 rounded border border-line2 bg-white px-4 text-sm font-bold text-ink2 transition hover:border-brand hover:bg-canvas hover:text-brand">편집 모드</button>
+                <button onClick={regenerate} className="inline-flex h-11 items-center gap-1.5 rounded border border-line2 bg-white px-4 text-sm font-bold text-ink2 transition hover:border-brand hover:bg-canvas hover:text-brand">재생성</button>
               </div>
               {!isMobile &&
                 (generatingNext ? (
@@ -209,6 +257,22 @@ export default function C4EditorViewer() {
         </div>
       </div>
 
+      {/* 다음 회차 생성 중 오버레이 */}
+      {generatingNext && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-[2px]" style={{ animation: "pw-fade .2s ease" }}>
+          <div className="w-full max-w-[360px] rounded-2xl bg-white px-10 py-9 text-center shadow-[0_8px_40px_rgba(0,0,0,0.2)]">
+            <div className="mx-auto mb-5 h-10 w-10 rounded-full border-[3px] border-wash border-t-brand" style={{ animation: "pw-spin 1.4s ease-in-out infinite" }} />
+            <div className="text-xl font-bold tracking-[-0.3px] text-ink">
+              <span className="text-brand">✦</span> {chapters.length + 1}화를 집필 중이에요
+            </div>
+            <div className="mt-2.5 text-sm text-muted">AI가 다음 이야기를 이어갑니다.<br />20~40초 소요돼요.</div>
+            <div className="mt-5 h-1.5 w-full overflow-hidden rounded-full bg-hairline">
+              <div className="h-full w-2/5 rounded-full bg-brand" style={{ animation: "pw-progress 1.8s ease-in-out infinite" }} />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MOBILE DRAWER */}
       {drawerOpen && (
         <>
@@ -216,7 +280,7 @@ export default function C4EditorViewer() {
           <div className="fixed inset-y-0 left-0 z-[41] w-[280px] max-w-[84vw] overflow-y-auto bg-white p-[18px] shadow-[2px_0_16px_rgba(0,0,0,0.16)]">
             <div className="mb-3.5 flex items-center justify-between">
               <span className="text-[15px] font-bold text-ink">회차 {chapters.length}</span>
-              <button onClick={() => setDrawerOpen(false)} className="h-8 w-8 rounded text-lg text-muted">×</button>
+              <button onClick={() => setDrawerOpen(false)} className="h-8 w-8 rounded text-lg text-muted">x</button>
             </div>
             {chapterList}
           </div>

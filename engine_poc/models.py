@@ -16,6 +16,10 @@ class Character:
     trait: str = ""           # 신체적 특징
     personality: str = ""     # 성격
     role: str = "supporting"  # protagonist/supporting/antagonist/helper
+    desire: str = ""          # 핵심 욕망 (행동 일관성)
+    fear: str = ""            # 핵심 두려움 (갈등 반응)
+    mannerism: str = ""       # 말버릇/행동 습관
+    secret: str = ""          # 비밀 (내러티브 복선용, 독자 비공개)
 
 
 @dataclass
@@ -48,8 +52,19 @@ class NovelSettings:
     style: str = ""               # 문체·톤 (03 §1, 선택)
     world_rules: str = ""         # 세계관 설정 (03 §2, 선택)
     constraints: str = ""         # 세부 금기·제약 (03 §3, 선택)
+    paragraph_length: str = "medium"  # short/medium/long — 문단 평균 길이
     characters: list = field(default_factory=list)       # list[Character]
     relationships: list = field(default_factory=list)    # list[Relationship]
+    # 파워/능력 시스템
+    power_system: dict = field(default_factory=dict)
+    # 감정 목표 & 레퍼런스
+    emotional_goal: str = ""
+    reference_work: str = ""
+    cliffhanger_style: str = ""
+    # 복선 계획: [{"hint": "...", "revealChapter": N}, ...]
+    foreshadowing: list = field(default_factory=list)
+    # 회차 패턴
+    chapter_rhythm: dict = field(default_factory=dict)
 
 
 # ── 가변 누적 상태 (13 §2 / 12 story_bible·chapter_summaries) ─────────────
