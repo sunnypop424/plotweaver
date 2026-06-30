@@ -305,8 +305,9 @@ def generate_chapter(novel_id: str, body: GenerateChapterRequest, user=Depends(g
     return {"seq": body.seq, "content": text, "word_count": len(text)}
 
 
-def _build_char_prompt(settings: dict, include_char: bool) -> str:
-    """인물 설정 + 관계도에서 표지용 캐릭터 묘사 블록 생성"""
+def _build_char_prompt(settings: dict, include_char: bool, featured_char_name: str = "") -> str:
+    """인물 설정에서 표지용 캐릭터 묘사 블록 생성.
+    featured_char_name: 사용자가 직접 선택한 동반 인물 이름. 빈 문자열이면 자동 선택."""
     if not include_char:
         return ""
     characters = settings.get("characters", [])
@@ -316,43 +317,53 @@ def _build_char_prompt(settings: dict, include_char: bool) -> str:
     if not protagonist:
         return ""
 
-    # 주인공과 관계 있는 핵심 인물 탐색 (관계도 기반)
-    relationships = settings.get("relationships", [])
-    pname = protagonist.get("name", "")
-    related_names: set[str] = set()
-    for r in relationships:
-        if r.get("fromChar") == pname:
-            related_names.add(r.get("toChar", ""))
-        elif r.get("toChar") == pname:
-            related_names.add(r.get("fromChar", ""))
-    related_names.discard("")
-
-    # 관계 있는 인물 중 빌런 > 조연 우선으로 최대 1명 선택
-    key_char = None
-    for role in ("villain", "supporting"):
-        candidates = [c for c in characters
-                      if c.get("role") == role and c.get("name") in related_names]
-        if candidates:
-            key_char = candidates[0]
-            break
-
     def _desc(c: dict) -> str:
         parts = []
-        if c.get("gender"):
-            parts.append(c["gender"])
+        # 성별 → 영어 캐릭터 타입으로 변환
+        gender = c.get("gender", "")
+        if gender in ("여", "여성", "여자"):
+            parts.append("beautiful young woman")
+        elif gender in ("남", "남성", "남자"):
+            parts.append("handsome young man")
+        elif gender:
+            parts.append(gender)
         if c.get("appearance"):
             parts.append(c["appearance"])
         if c.get("personality"):
             parts.append(c["personality"])
         detail = ", ".join(parts)
-        return f"{c.get('name', 'character')} ({detail})" if detail else c.get("name", "character")
+        return f"{c.get('name', '')} [{detail}]" if detail else c.get("name", "character")
 
     prot_desc = _desc(protagonist)
+
+    # 동반 인물 결정: 사용자 직접 지정 > 관계도 기반 자동 선택
+    key_char = None
+    if featured_char_name:
+        # 사용자가 직접 선택한 인물
+        key_char = next((c for c in characters if c.get("name") == featured_char_name), None)
+    else:
+        # 관계도 기반 자동 선택: 주인공과 연결된 조연/빌런 중 1명
+        relationships = settings.get("relationships", [])
+        pname = protagonist.get("name", "")
+        related_names: set[str] = set()
+        for r in relationships:
+            if r.get("fromChar") == pname:
+                related_names.add(r.get("toChar", ""))
+            elif r.get("toChar") == pname:
+                related_names.add(r.get("fromChar", ""))
+        related_names.discard("")
+        for role in ("supporting", "villain"):
+            candidates = [c for c in characters
+                          if c.get("role") == role and c.get("name") in related_names]
+            if candidates:
+                key_char = candidates[0]
+                break
+
     if key_char:
         key_desc = _desc(key_char)
         return (
             f"Characters in the scene — Protagonist: {prot_desc}, placed prominently in the foreground with a dramatic pose. "
-            f"Key figure: {key_desc}, visible alongside the protagonist. "
+            f"Key figure alongside protagonist: {key_desc}. "
             "Both characters must be clearly recognizable with expressive, dynamic poses that reflect their personalities. "
         )
     else:
@@ -382,64 +393,126 @@ def generate_cover(novel_id: str, body: dict = Body(default={}), user=Depends(ge
     include_title = body.get("includeTitle", False)
     include_author = body.get("includeAuthor", False)
     include_char = body.get("includeChar", True)
+    featured_char_name = (body.get("featuredCharName") or "").strip()
     author_name = body.get("authorName", "").strip()
 
-    style_map = {
-        "웹툰풍": "webtoon comic art style, Korean manhwa style",
-        "유화풍": "oil painting style, dramatic lighting",
-        "미니멀 타이포": "minimal graphic design, typographic poster",
-        "실사풍": "photorealistic illustration, cinematic",
-        "수묵화": "traditional East Asian ink wash painting, sumi-e style, monochrome brush strokes",
-        "사이버펑크": "cyberpunk neon-lit illustration, futuristic dystopian style",
+    # ── 아트 스타일 ────────────────────────────────────────────────────────
+    # 웹툰풍 선택 시 캐릭터 렌더링 키워드까지 포함 (cell shading, glossy eyes 등)
+    STYLE_MAP = {
+        "웹툰풍": (
+            "Korean webtoon manhwa art style, clean cell shading, glossy detailed eyes, "
+            "smooth gradient skin, refined clean lineart, semi-realistic character design"
+        ),
+        "유화풍": (
+            "oil painting style, dramatic chiaroscuro lighting, rich painterly textures, "
+            "baroque composition, expressive brush strokes"
+        ),
+        "미니멀 타이포": (
+            "minimal graphic design, flat vector illustration, clean bold shapes, "
+            "modern poster composition, geometric negative space"
+        ),
+        "실사풍": (
+            "photorealistic illustration, cinematic rendering, detailed realistic lighting, "
+            "hyper-detailed digital painting"
+        ),
+        "수묵화": (
+            "traditional East Asian ink wash painting sumi-e style, flowing monochrome brush strokes "
+            "with selective vibrant color, elegant negative space, organic expressive linework"
+        ),
+        "사이버펑크": (
+            "cyberpunk neon-lit concept art, futuristic dystopian aesthetic, "
+            "glowing holographic UI elements, volumetric neon lighting, sci-fi digital painting"
+        ),
     }
-    art_style = style_map.get(style, "webtoon comic art style")
+    art_style = STYLE_MAP.get(style, STYLE_MAP["웹툰풍"])
 
-    tone = settings.get("coverTone", "어두운")
-    tone_map = {
-        "어두운": "dark and dramatic mood, deep shadows",
-        "밝은": "bright and vibrant mood, warm lighting",
-        "파스텔": "soft pastel tones, gentle and dreamy atmosphere",
+    # ── 색감 톤 ────────────────────────────────────────────────────────────
+    TONE_MAP = {
+        "어두운": "dark and dramatic mood, deep shadows, high contrast",
+        "밝은": "bright vibrant mood, warm lighting, energetic atmosphere",
+        "파스텔": "soft pastel tones, gentle dreamy atmosphere, delicate bokeh",
     }
-    tone_desc = tone_map.get(tone, "dark and dramatic mood")
+    tone_desc = TONE_MAP.get(settings.get("coverTone", "어두운"), TONE_MAP["어두운"])
 
-    # 텍스트 오버레이 지시
+    # ── 장르별 시각 청사진 ─────────────────────────────────────────────────
+    # 장르 키워드 → 조명·색감·분위기·구도 힌트
+    GENRE_BLUEPRINTS: dict[str, dict[str, str]] = {
+        "로맨스":         {"mood": "romantic tension, soft glowing backlighting, bokeh bloom",        "palette": "pastel pink and lavender palette"},
+        "로맨스 판타지":  {"mood": "dreamy ethereal atmosphere, soft bokeh lighting, magical glow",   "palette": "pastel pink, lavender and gold palette"},
+        "순정":           {"mood": "sweet romantic atmosphere, warm soft lighting",                    "palette": "warm peach and cream tones"},
+        "무협":           {"mood": "dramatic misty mountain atmosphere, falling cherry blossoms",      "palette": "deep indigo and crimson accents"},
+        "동양 판타지":    {"mood": "mystical oriental atmosphere, dramatic clouds and mist",           "palette": "indigo, gold and jade tones"},
+        "판타지":         {"mood": "epic magical atmosphere, dramatic fantasy lighting",               "palette": "rich jewel tones, gold and deep blue"},
+        "다크 판타지":    {"mood": "gothic menacing atmosphere, heavy shadow and candlelight",         "palette": "crimson and gold against deep black"},
+        "헌터":           {"mood": "intense action energy, glowing ability effects, portal glow",      "palette": "teal and orange cinematic color grading"},
+        "게이트":         {"mood": "intense action energy, ominous portal atmosphere",                 "palette": "teal and dark purple grading"},
+        "액션":           {"mood": "dynamic action pose, energy particles, high contrast drama",       "palette": "bold contrast, teal and orange grading"},
+        "회귀":           {"mood": "temporal mystery atmosphere, glowing time-rewind effect",          "palette": "cobalt blue and gold tones"},
+        "빙의":           {"mood": "ethereal transformation glow, mysterious atmosphere",              "palette": "soft violet and silver tones"},
+        "힐링":           {"mood": "warm cozy inviting atmosphere, gentle sunlight",                   "palette": "cream beige and soft orange tones"},
+        "일상":           {"mood": "gentle everyday warmth, cheerful simple atmosphere",               "palette": "warm cream and soft yellow tones"},
+        "SF":             {"mood": "futuristic megacity skyline, holographic UI glow, rain reflection","palette": "electric blue and magenta neon palette"},
+        "사이버펑크":     {"mood": "neon rain-drenched streets, volumetric light shafts",             "palette": "electric blue, magenta and deep black"},
+        "공포":           {"mood": "eerie oppressive darkness, unsettling shadows",                   "palette": "desaturated grey with sickly green accents"},
+        "스릴러":         {"mood": "tense cinematic darkness, sharp cold lighting",                   "palette": "cold blue and grey tones"},
+        "BL":             {"mood": "romantic close atmosphere, gentle intimate lighting",              "palette": "soft indigo and warm cream palette"},
+        "GL":             {"mood": "soft romantic bloom, dreamy feminine atmosphere",                  "palette": "lavender and rose gold palette"},
+        "성장":           {"mood": "hopeful uplifting atmosphere, dynamic upward energy",             "palette": "warm amber and sky blue tones"},
+    }
+    genre_list = settings.get("genres", [])
+    blueprint = next(
+        (GENRE_BLUEPRINTS[g.strip()] for g in genre_list if g.strip() in GENRE_BLUEPRINTS),
+        None
+    )
+    genre_mood   = blueprint["mood"]   if blueprint else "dramatic atmospheric composition"
+    genre_palette = blueprint["palette"] if blueprint else "rich balanced color palette"
+
+    # ── 제목/공간 처리 ─────────────────────────────────────────────────────
     if include_title and include_author and author_name:
         text_instruction = (
-            f"Include the Korean title '{title}' as bold, prominent typography on the upper portion of the cover. "
-            f"Include the author name '{author_name}' in smaller elegant text near the bottom. "
-            "The text must be legible and integrated beautifully into the composition."
+            f"Include the Korean title '{title}' as bold elegant typography at the top of the cover. "
+            f"Include the author name '{author_name}' in smaller refined text near the bottom. "
+            "Text integrated beautifully into the composition."
         )
+        title_space = ""
     elif include_title:
         text_instruction = (
-            f"Include the Korean title '{title}' as bold, prominent typography on the cover. "
-            "The text must be legible and integrated beautifully into the composition."
+            f"Include the Korean title '{title}' as bold prominent typography at the top of the cover, "
+            "integrated beautifully into the composition."
         )
+        title_space = ""
     elif include_author and author_name:
         text_instruction = (
-            f"Include the author name '{author_name}' in small elegant text near the bottom of the cover. "
-            "No other text."
+            f"Include the author name '{author_name}' in small elegant text near the bottom. No other text."
         )
+        title_space = "Leave clear ornate negative space at the top third for title overlay."
     else:
-        text_instruction = "No title text, no author text, no watermarks, no UI elements."
+        text_instruction = "No title text, no author text, no watermarks, no UI elements anywhere."
+        title_space = "Leave clear negative space at the top third of the image for title text overlay."
 
-    # 인물 묘사 블록
-    char_block = _build_char_prompt(settings, include_char)
+    # ── 인물 묘사 블록 ─────────────────────────────────────────────────────
+    char_block = _build_char_prompt(settings, include_char, featured_char_name)
 
-    # 대사/텍스트 금지 — 항상 적용
+    # ── 대사·UI 텍스트 완전 금지 ──────────────────────────────────────────
     no_dialogue = (
-        "STRICT RULE: No speech bubbles, no dialogue text, no captions, no word balloons, "
-        "no onomatopoeia text, no subtitles anywhere in the image. Pure visual illustration only."
+        "STRICT RULE: Absolutely NO speech bubbles, NO dialogue text, NO captions, "
+        "NO word balloons, NO onomatopoeia, NO subtitles, NO UI text in the image. Pure visual only."
     )
 
+    # ── 최종 프롬프트 조립 ─────────────────────────────────────────────────
     prompt_parts = [
-        f"Professional book cover for a Korean web novel titled '{title}'.",
-        f"Genre: {genres}. Setting: {era}.",
-        f"Art style: {art_style}. Mood: {tone_desc}.",
+        f"Professional Korean web novel book cover, portrait orientation (2:3 ratio).",
+        f"Title: '{title}'. Genre: {genres}. Setting: {era}.",
+        f"Art style: {art_style}.",
+        f"Atmosphere: {genre_mood}.",
+        f"Color palette: {genre_palette}, {tone_desc}.",
     ]
     if char_block:
         prompt_parts.append(char_block)
+    if title_space:
+        prompt_parts.append(title_space)
     prompt_parts += [
-        "Vertical format (portrait orientation), dramatic composition, high quality illustration.",
+        "Dramatic high-quality illustration, vertical cover composition, visually striking.",
         no_dialogue,
         text_instruction,
     ]

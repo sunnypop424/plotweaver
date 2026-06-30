@@ -301,9 +301,17 @@ export default function C0WorldWizard() {
 
       {/* 편집 모드 배너 */}
       {isEditMode && (
-        <div className="sticky top-0 z-30 flex items-center gap-2.5 border-b border-[#ffe4b8] bg-[#fff8ee] px-5 py-3">
-          <span className="rounded-full bg-[#fff3e0] px-2 py-0.5 text-[11px] font-bold text-[#d9822b]">편집 중</span>
-          <span className="text-sm font-bold text-[#9a5000]">기존 작품의 설정을 편집하고 있어요. 세계관 시각 맵은 재설정이 필요해요.</span>
+        <div className="sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-[#ffe4b8] bg-[#fff8ee] px-5 py-3">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="rounded-full bg-[#fff3e0] px-2 py-0.5 text-[11px] font-bold text-[#d9822b] flex-shrink-0">편집 중</span>
+            <span className="text-sm font-bold text-[#9a5000] truncate">기존 작품의 설정을 편집하고 있어요.</span>
+          </div>
+          <button
+            onClick={() => navigate(`/works/${wizData.editingNovelId}`)}
+            className="h-8 flex-shrink-0 rounded border border-[#ffe4b8] bg-white px-3.5 text-[13px] font-bold text-[#9a5000] transition hover:bg-[#fff3e0]"
+          >
+            ← 작품으로
+          </button>
         </div>
       )}
 

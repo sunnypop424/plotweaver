@@ -21,6 +21,8 @@ export default function C5CoverGenerator() {
   const [style, setStyle] = useState<Hybrid>({ value: "웹툰풍", custom: false, text: "" });
   const [tone, setTone] = useState<Hybrid>({ value: "어두운", custom: false, text: "" });
   const [includeChar, setIncludeChar] = useState(true);
+  // 함께 등장시킬 인물 선택 ("" = 주인공 단독, 캐릭터 이름 = 해당 인물 동반)
+  const [featuredCharName, setFeaturedCharName] = useState("");
   const [includeTitle, setIncludeTitle] = useState(false);
   const [includeAuthor, setIncludeAuthor] = useState(false);
   const [authorName, setAuthorName] = useState("");
@@ -73,6 +75,7 @@ export default function C5CoverGenerator() {
         includeTitle,
         includeAuthor,
         includeChar,
+        featuredCharName: includeChar && featuredCharName ? featuredCharName : undefined,
         authorName: includeAuthor ? authorName : undefined,
       });
       setCoverUrls(res.cover_urls?.length ? res.cover_urls : [res.cover_url]);
@@ -162,12 +165,48 @@ export default function C5CoverGenerator() {
             </div>
 
             <div className="mb-[22px] flex flex-col gap-3">
-              <button onClick={() => setIncludeChar((v) => !v)} className="inline-flex items-center gap-2.5 py-0.5 text-sm font-bold text-ink">
-                <span className={"flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[13px] leading-none text-white transition-all " + (includeChar ? "border border-brand bg-brand" : "border border-line2 bg-white")}>
-                  {includeChar ? "✓" : ""}
-                </span>
-                인물 포함
-              </button>
+              {/* 인물 포함 토글 + 인물 선택 */}
+              <div>
+                <button onClick={() => { setIncludeChar((v) => !v); if (includeChar) setFeaturedCharName(""); }} className="inline-flex items-center gap-2.5 py-0.5 text-sm font-bold text-ink">
+                  <span className={"flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[13px] leading-none text-white transition-all " + (includeChar ? "border border-brand bg-brand" : "border border-line2 bg-white")}>
+                    {includeChar ? "✓" : ""}
+                  </span>
+                  인물 포함
+                </button>
+                {includeChar && (() => {
+                  const nonProts = (novelData?.settings?.characters ?? []).filter(c => c.role !== "protagonist");
+                  if (nonProts.length === 0) return null;
+                  const ROLE_LABEL: Record<string, string> = { villain: "빌런", supporting: "조연" };
+                  return (
+                    <div className="mt-2.5 flex flex-col gap-1.5 pl-[30px]" style={{ animation: "pw-fade .15s ease" }}>
+                      <div className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">함께 등장시킬 인물</div>
+                      {/* 주인공 단독 옵션 */}
+                      <button
+                        onClick={() => setFeaturedCharName("")}
+                        className={"inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-[13px] font-bold transition " + (!featuredCharName ? "border-brand bg-wash text-brand" : "border-hairline bg-white text-ink2 hover:border-line2")}
+                      >
+                        <span className="flex h-4 w-4 items-center justify-center rounded-full border text-[9px] font-bold" style={{ borderColor: !featuredCharName ? "#816bff" : "#e5e5e5", background: !featuredCharName ? "#816bff" : "white", color: "white" }}>
+                          {!featuredCharName ? "✓" : ""}
+                        </span>
+                        주인공 단독
+                      </button>
+                      {nonProts.map(c => (
+                        <button
+                          key={c.name}
+                          onClick={() => setFeaturedCharName(c.name)}
+                          className={"inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-[13px] font-bold transition " + (featuredCharName === c.name ? "border-brand bg-wash text-brand" : "border-hairline bg-white text-ink2 hover:border-line2")}
+                        >
+                          <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full border text-[9px] font-bold" style={{ borderColor: featuredCharName === c.name ? "#816bff" : "#e5e5e5", background: featuredCharName === c.name ? "#816bff" : "white", color: "white" }}>
+                            {featuredCharName === c.name ? "✓" : ""}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate text-left">{c.name}</span>
+                          {c.role && <span className="rounded-full bg-[#f2f2f2] px-1.5 py-0.5 text-[10px] font-bold text-muted">{ROLE_LABEL[c.role] ?? c.role}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
               <button onClick={() => setIncludeTitle((v) => !v)} className="inline-flex items-center gap-2.5 py-0.5 text-sm font-bold text-ink">
                 <span className={"flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-[13px] leading-none text-white transition-all " + (includeTitle ? "border border-brand bg-brand" : "border border-line2 bg-white")}>
                   {includeTitle ? "✓" : ""}
