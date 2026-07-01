@@ -6,6 +6,7 @@ export type WFaction  = { id: number; name: string; color: string; category: str
 export type WRank     = { id: number; name: string; desc: string; variants: string[] };
 export type WRegion   = { id: number; name: string; factionId: number | ""; desc: string; x: number; y: number };
 export type WMapEdge  = { id: number; from: number; to: number; label: string; labelCustom: boolean; desc: string };
+export type WFactionRelation = { id: number; fromFactionId: number | ""; toFactionId: number | ""; relation: string; desc: string };
 
 type WizardState = NovelSettings & {
   novelId: string | null;
@@ -17,6 +18,7 @@ type WizardState = NovelSettings & {
   worldRanksData: WRank[];
   worldRegions: WRegion[];
   worldMapEdges: WMapEdge[];
+  factionRelations: WFactionRelation[];
 };
 
 const DEFAULT: WizardState = {
@@ -31,6 +33,7 @@ const DEFAULT: WizardState = {
   worldRanksData: [],
   worldRegions: [],
   worldMapEdges: [],
+  factionRelations: [],
   powerSystem: { enabled: false, rankNames: "", coreRule: "", protagonistRank: "", protagonistGoal: "", limitation: "" },
   characters: [],
   goal: "",
@@ -95,6 +98,7 @@ type SaveWorldPayload = Pick<WizardState,
   "era" | "genres" | "worldRules" | "constraints" | "glossaryDict" |
   "worldFactions" | "worldRanks" |
   "worldFactionsData" | "worldRanksData" | "worldRegions" | "worldMapEdges" |
+  "factionRelations" |
   "powerSystem"
 >;
 
@@ -190,6 +194,7 @@ export function WizardProvider({ children }: { children: ReactNode }) {
       worldRanksData: s.worldRanksData ?? [],
       worldRegions: s.worldRegions ?? [],
       worldMapEdges: s.worldMapEdges ?? [],
+      factionRelations: s.factionRelations ?? [],
       novelId: null,
       chapterContent: null,
       editingNovelId: novelId,

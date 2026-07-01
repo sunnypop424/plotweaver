@@ -77,7 +77,7 @@ def four_act_line(novel):
 
 
 # ── 컨텍스트 어셈블 (13 §3·§4-3) ─────────────────────────────────────────
-def assemble(novel, seq, bible: StoryBible):
+def assemble(novel, seq, bible: StoryBible, user_note: str = ""):
     system = prompts.build_system(novel)
     recent = bible.summaries[-config.RECENT_SUMMARY_WINDOW:]
     context = prompts.build_context(
@@ -89,13 +89,13 @@ def assemble(novel, seq, bible: StoryBible):
         bible.glossary,
     )
     last_scene = bible.summaries[-1].last_scene if bible.summaries else ""
-    task = prompts.build_task(novel, seq, stage_of(seq, novel.total_chapters), last_scene)
+    task = prompts.build_task(novel, seq, stage_of(seq, novel.total_chapters), last_scene, user_note=user_note)
     return system, f"{context}\n\n{task}"
 
 
 # ── 회차 생성 + 갱신 루프 ────────────────────────────────────────────────
-def generate_chapter(novel, seq, bible: StoryBible):
-    system, user = assemble(novel, seq, bible)
+def generate_chapter(novel, seq, bible: StoryBible, user_note: str = ""):
+    system, user = assemble(novel, seq, bible, user_note=user_note)
     text = llm.generate("prose", system, user, label=f"ch{seq}")
 
     # §5-1 분량 가드: 너무 짧으면 이어쓰기 1회
@@ -108,12 +108,17 @@ def generate_chapter(novel, seq, bible: StoryBible):
             label=f"ch{seq}-cont")
         text = text.rstrip() + "\n\n" + cont.lstrip()
 
-    summary = _writeback(novel, seq, text, bible)   # §4-2 스토리 바이블 갱신
+    summary = writeback(novel, seq, text, bible)   # §4-2 스토리 바이블 갱신
     return text, summary
 
 
-def _writeback(novel, seq, text, bible: StoryBible) -> ChapterSummary:
-    """본문 → 요약·상태 추출 → 스토리 바이블 갱신 (13 §4-2)."""
+MAX_OPEN_THREADS = 15  # 열린 복선 누적 캡 — 넘으면 오래된 것부터 제거
+
+
+def writeback(novel, seq, text, bible: StoryBible) -> ChapterSummary:
+    """본문 → 요약·상태 추출 → 스토리 바이블 갱신 (13 §4-2).
+    AI 생성 직후뿐 아니라, 사람이 회차를 수동으로 고친 뒤에도 동일하게 호출해
+    수동 편집 내용이 다음 회차 컨텍스트에 반영되게 한다."""
     raw = llm.generate("extract", "너는 정확한 요약 도우미다.",
                        prompts.build_extract_prompt(seq, text), label=f"ch{seq}-extract")
     data = _parse_json(raw)
@@ -124,10 +129,27 @@ def _writeback(novel, seq, text, bible: StoryBible) -> ChapterSummary:
         open_threads=data.get("open_threads", []) or [],
         last_scene=_tail(text, 280),
     )
-    bible.summaries.append(summary)
-    # 작품 전역 열린 복선 = 가장 최신 회차 기준으로 갱신(단순화)
+    # 같은 회차를 재생성/수동편집해서 다시 writeback하는 경우 요약이 중복 누적되지 않도록,
+    # 기존 seq 항목은 제거하고 새 요약으로 교체한다.
+    bible.summaries = [s for s in bible.summaries if s.seq != seq] + [summary]
+    # last_scene은 assemble()에서 가장 최근 회차 것만 읽힌다 — 나머지는 회차당 최대 280자를
+    # 영구히 죽은 채로 저장하게 되므로, 최신 항목을 제외하고는 비워서 스토리 바이블 크기를 줄인다.
+    for s in bible.summaries[:-1]:
+        s.last_scene = ""
+    # 작품 전역 열린 복선 = 이전 목록과 병합(교집합 유지) + 중복 제거 + 캡.
+    # 예전엔 이번 회차 추출분으로 통째로 덮어써서, 언급 안 된 이전 복선이 사라졌음.
     if summary.open_threads:
-        bible.open_threads = summary.open_threads
+        merged = list(bible.open_threads)
+        for t in summary.open_threads:
+            if t not in merged:
+                merged.append(t)
+        bible.open_threads = merged[-MAX_OPEN_THREADS:]
+    # 자동 추출된 고유명사는 기존 표기(위저드 시딩분 포함)를 덮어쓰지 않고 빈 자리만 채운다.
+    new_terms = data.get("new_terms") or {}
+    if isinstance(new_terms, dict):
+        for term, meaning in new_terms.items():
+            if term and term not in bible.glossary:
+                bible.glossary[term] = meaning
     return summary
 
 

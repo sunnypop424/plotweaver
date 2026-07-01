@@ -87,6 +87,9 @@ def build_system(novel) -> str:
     }
     if cliffhanger_style in cliff_map:
         cliff_rule = f"\n⑦ 클리프행어 스타일: {cliff_map[cliffhanger_style]}"
+    elif cliffhanger_style:
+        # 알려진 4종 외의 값이 들어와도 폴백 없이 조용히 무시되지 않도록 범용 지시로 대체
+        cliff_rule = "\n⑦ 클리프행어 스타일: 회차 끝에 다음 화를 보지 않고는 못 배기게 만드는 지점에서 끊는다."
 
     # 회차 패턴
     rhythm = getattr(novel, "chapter_rhythm", {}) or {}
@@ -244,7 +247,8 @@ def build_extract_prompt(seq, chapter_text) -> str:
 {{
   "summary_short": "이 회차 내용을 2~3문장으로 압축",
   "state_delta": ["이 회차에서 바뀐 상태(관계 변화/사망/획득/장소 이동 등) 짧게", "..."],
-  "open_threads": ["아직 회수되지 않은 복선·떡밥", "..."]
+  "open_threads": ["아직 회수되지 않은 복선·떡밥", "..."],
+  "new_terms": {{"이 회차에 새로 등장한 고유명사": "표준 표기·짧은 뜻"}}
 }}
 
 [본문]

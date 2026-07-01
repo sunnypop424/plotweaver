@@ -4,7 +4,7 @@ import { HybridSelect } from "@/components/HybridSelect";
 import { useToast } from "@/components/Toast";
 import { useViewport } from "@/lib/useViewport";
 import { useWizard } from "@/providers/WizardProvider";
-import { suggestNarrative } from "@/lib/api";
+import { suggestNarrative, updateNovel } from "@/lib/api";
 
 type Hybrid = { value: string; custom: boolean; text: string };
 const hybridVal = (f: Hybrid) => (f.custom ? f.text.trim() : f.value);
@@ -48,6 +48,7 @@ export default function CNarrativeWizard() {
     gyeol: wizData.storyFlow["절정"] || "",
   }));
   const [aiLoading, setAiLoading] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   // 감정 목표 & 레퍼런스
   const [emotionalGoal, setEmotionalGoal] = useState(wizData.emotionalGoal ?? "");
@@ -88,6 +89,23 @@ export default function CNarrativeWizard() {
     chapterRhythm: { eventEveryN: chapterRhythm.eventEveryN, maxOpenThreads: chapterRhythm.maxOpenThreads, note: chapterRhythm.note },
   });
 
+  const goNext = async () => {
+    const patch = collectNarrative();
+    saveNarrative(patch);
+    if (wizData.editingNovelId) {
+      setSavingEdit(true);
+      try {
+        await updateNovel(wizData.editingNovelId, { settings: { ...wizData, ...patch } });
+      } catch {
+        showToast("저장에 실패했어요");
+        setSavingEdit(false);
+        return;
+      }
+      setSavingEdit(false);
+    }
+    navigate("/create/output");
+  };
+
   const aiSuggest = async () => {
     setAiLoading(true);
     try {
@@ -100,13 +118,15 @@ export default function CNarrativeWizard() {
         emotionalGoal: emotionalGoal || undefined,
         referenceWork: referenceWork || undefined,
         synopsis: synopsis || undefined,
-        characters: wizData.characters.map(c => c.name),
+        characters: wizData.characters.map(c => ({ name: c.name, role: c.role, personality: c.personality })),
         worldRules: wizData.worldRules,
         relationships: wizData.relationships.map(r => ({
           fromChar: r.fromChar,
           toChar: r.toChar,
           relation: r.relation ?? "",
         })),
+        foreshadowing: foreshadowing.filter(f => f.hint.trim()).map(f => ({ hint: f.hint.trim(), revealChapter: parseInt(f.revealChapter) || 0 })),
+        chapterRhythm,
       });
       setStages({ ki: res.ki, seung: res.seung, jeon: res.jeon, gyeol: res.gyeol });
       showToast("AI가 4단 구조를 제안했어요");
@@ -331,7 +351,7 @@ export default function CNarrativeWizard() {
               <button onClick={() => navigate("/create/relations")} className="h-14 rounded border border-line2 bg-white px-[22px] text-base font-bold text-ink2 transition hover:border-wash-2 hover:bg-wash hover:text-brand">← 이전: 관계도</button>
               <div className="flex items-center gap-3.5">
                 {!valid && <span className="text-[13px] font-bold text-muted">필수 항목(*)을 채우면 다음으로 넘어갈 수 있어요.</span>}
-                <button disabled={!valid} onClick={() => { saveNarrative(collectNarrative()); navigate("/create/output"); }} className={(valid ? "pw-btn-primary" : "pw-btn-disabled") + " h-14 px-7 text-lg"}>다음: 출력설정 →</button>
+                <button disabled={!valid || savingEdit} onClick={goNext} className={(valid ? "pw-btn-primary" : "pw-btn-disabled") + " h-14 px-7 text-lg"}>{savingEdit ? "저장 중..." : "다음: 출력설정 →"}</button>
               </div>
             </div>
           )}
@@ -378,7 +398,7 @@ export default function CNarrativeWizard() {
           {!valid && <div className="mb-2 text-center text-xs font-bold text-muted">필수 항목(*)을 채워주세요</div>}
           <div className="flex gap-2.5">
             <button onClick={() => navigate("/create/relations")} className="h-[54px] flex-shrink-0 rounded border border-line2 bg-white px-[18px] text-[15px] font-bold text-ink2">← 이전</button>
-            <button disabled={!valid} onClick={() => { saveNarrative(collectNarrative()); navigate("/create/output"); }} className={(valid ? "pw-btn-primary" : "pw-btn-disabled") + " h-[54px] flex-1 text-base"}>다음: 출력설정 →</button>
+            <button disabled={!valid || savingEdit} onClick={goNext} className={(valid ? "pw-btn-primary" : "pw-btn-disabled") + " h-[54px] flex-1 text-base"}>{savingEdit ? "저장 중..." : "다음: 출력설정 →"}</button>
           </div>
         </div>
       )}

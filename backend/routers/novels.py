@@ -1,16 +1,45 @@
 """작품 CRUD — POST /api/novels, GET /api/novels, GET /api/novels/{id}"""
 from fastapi import APIRouter, Depends, HTTPException, Body
-from pydantic import BaseModel
-from typing import Any
+from pydantic import BaseModel, ConfigDict, ValidationError
+from typing import Any, Optional
 from auth import get_current_user
 from db import get_db
 
 router = APIRouter()
 
 
+class NovelSettingsModel(BaseModel):
+    """novels.settings JSON에 대한 느슨한 검증 — 알려진 필드는 대략적 타입만 확인하고,
+    프론트엔드 전용 부가 필드(worldFactionsData/worldRegions/factionRelations 등)는
+    extra="allow"로 그대로 통과시킨다. 명백한 타입 오류(예: characters가 리스트가 아님)만 걸러낸다."""
+    model_config = ConfigDict(extra="allow")
+
+    era: Optional[str] = None
+    genres: Optional[list] = None
+    worldRules: Optional[str] = None
+    constraints: Optional[str] = None
+    glossaryDict: Optional[dict] = None
+    worldFactions: Optional[list] = None
+    worldRanks: Optional[list] = None
+    characters: Optional[list] = None
+    goal: Optional[str] = None
+    conflict: Optional[str] = None
+    storyFlow: Optional[dict] = None
+    ending: Optional[str] = None
+    relationships: Optional[list] = None
+    pov: Optional[str] = None
+    totalChapters: Optional[int] = None
+    length: Optional[str] = None
+    title: Optional[str] = None
+    ageRating: Optional[str] = None
+    tone: Optional[str] = None
+    coverStyle: Optional[str] = None
+    unit: Optional[str] = None
+
+
 class NovelCreate(BaseModel):
     title: str
-    settings: dict[str, Any]
+    settings: NovelSettingsModel
 
 
 @router.post("/")
@@ -19,7 +48,7 @@ def create_novel(body: NovelCreate, user=Depends(get_current_user)):
     result = db.table("novels").insert({
         "author_id": str(user.id),
         "title": body.title,
-        "settings": body.settings,
+        "settings": body.settings.model_dump(exclude_none=True),
     }).execute()
     if not result.data:
         raise HTTPException(status_code=500, detail="작품 생성 실패")
@@ -80,6 +109,11 @@ def update_novel(novel_id: str, body: dict = Body(...), user=Depends(get_current
     allowed = {k: body[k] for k in ("status", "title", "settings", "cover_url") if k in body}
     if not allowed:
         raise HTTPException(status_code=400, detail="업데이트할 항목이 없습니다")
+    if "settings" in allowed:
+        try:
+            allowed["settings"] = NovelSettingsModel.model_validate(allowed["settings"]).model_dump(exclude_none=True)
+        except ValidationError as e:
+            raise HTTPException(status_code=422, detail=f"설정 형식이 올바르지 않습니다: {str(e)[:300]}")
     try:
         result = db.table("novels").update(allowed).eq("id", novel_id).execute()
     except Exception as e:

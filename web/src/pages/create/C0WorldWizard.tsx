@@ -5,7 +5,7 @@ import { useToast } from "@/components/Toast";
 import { useViewport } from "@/lib/useViewport";
 import { useCanvasDrag } from "@/lib/useCanvasDrag";
 import { useWizard } from "@/providers/WizardProvider";
-import { suggestWorld } from "@/lib/api";
+import { suggestWorld, updateNovel } from "@/lib/api";
 
 /* ── 옵션 / 장르 적응형 키트 ─────────────────────────────────────────── */
 const ERA_OPTIONS = ["동양 무협", "중세 유럽", "조선시대", "현대 도시", "근미래 SF", "이세계 판타지"];
@@ -34,12 +34,25 @@ const kitFor = (e: string) =>
   : e.includes("SF") || e.includes("현대") || e.includes("근미래") ? "modern"
   : "generic";
 
+/* 목표(goal)는 4단계(서사설정)에서만 채워지므로, 1단계에서는 goal이 항상 비어있다.
+   goal이 없으면 worldRules/장르로 대략적인 시놉시스를 대신 만들어 AI 생성이 빈 값을 받지 않게 한다. */
+function buildSynopsisFallback(goal: string, worldRules: string, genres: string[]): string {
+  if (goal) return goal;
+  const parts: string[] = [];
+  if (genres.length) parts.push(`${genres.join("·")} 장르`);
+  if (worldRules) parts.push(worldRules.slice(0, 80));
+  return parts.length ? parts.join(" · ") : "";
+}
+
 /* ── 타입 ────────────────────────────────────────────────────────────── */
 type Faction = { id: number; name: string; color: string; category: string; categoryCustom: boolean; leader: string; parentId: string; desc: string; costume: string };
 type Rank = { id: number; name: string; desc: string; variants: string[] };
 type Term = { id: number; term: string; category: string; categoryCustom: boolean; meaning: string };
 type Region = { id: number; name: string; factionId: number | ""; desc: string; x: number; y: number };
 type MapEdge = { id: number; from: number; to: number; label: string; labelCustom: boolean; desc: string };
+type FactionRelation = { id: number; fromFactionId: number | ""; toFactionId: number | ""; relation: string; desc: string };
+
+const FACTION_REL_OPTIONS = ["우방", "적대", "중립"];
 
 
 export default function C0WorldWizard() {
@@ -55,6 +68,7 @@ export default function C0WorldWizard() {
   const gid   = useRef(Object.keys(wizData.glossaryDict).length);
   const regId = useRef(maxId(wizData.worldRegions));
   const eid   = useRef(maxId(wizData.worldMapEdges));
+  const frId  = useRef(maxId(wizData.factionRelations));
   const aiTimer = useRef<number | undefined>(undefined);
   const mapTimer = useRef<number | undefined>(undefined);
 
@@ -70,6 +84,7 @@ export default function C0WorldWizard() {
   const [genreCustomText, setGenreCustomText] = useState("");
 
   const [factions, setFactions] = useState<Faction[]>(() => (wizData.worldFactionsData as Faction[]) ?? []);
+  const [factionRelations, setFactionRelations] = useState<FactionRelation[]>(() => (wizData.factionRelations as FactionRelation[]) ?? []);
   const [ranks, setRanks] = useState<Rank[]>(() => (wizData.worldRanksData as Rank[]) ?? []);
   const [glossary, setGlossary] = useState<Term[]>(() => {
     const entries = Object.entries(wizData.glossaryDict);
@@ -86,6 +101,11 @@ export default function C0WorldWizard() {
 
   const [aiLoading, setAiLoading] = useState(false);
   const [mapAutoLoading, setMapAutoLoading] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+  // null = "자동"(직접 정하지 않으면 AI가 알아서 12개 이내로 결정)
+  const [factionCount, setFactionCount] = useState<number | null>(null);
+  const [rankCount, setRankCount] = useState<number | null>(null);
+  const [glossaryCount, setGlossaryCount] = useState<number | null>(null);
 
   const [powerSystem, setPowerSystem] = useState(() => ({
     enabled: wizData.powerSystem?.enabled ?? false,
@@ -125,7 +145,15 @@ export default function C0WorldWizard() {
   const removeFaction = (id: number) => {
     setFactions((fs) => fs.filter((f) => f.id !== id));
     setRegions((rs) => rs.map((r) => (r.factionId === id ? { ...r, factionId: "" } : r)));
+    setFactionRelations((frs) => frs.filter((fr) => fr.fromFactionId !== id && fr.toFactionId !== id));
   };
+
+  /* ── 액션: 세력관계 ─────────────────────────────────────────────────── */
+  const updateFactionRelation = (id: number, patch: Partial<FactionRelation>) =>
+    setFactionRelations((frs) => frs.map((fr) => (fr.id === id ? { ...fr, ...patch } : fr)));
+  const addFactionRelation = () =>
+    setFactionRelations((frs) => [...frs, { id: ++frId.current, fromFactionId: "", toFactionId: "", relation: "우방", desc: "" }]);
+  const removeFactionRelation = (id: number) => setFactionRelations((frs) => frs.filter((fr) => fr.id !== id));
 
   /* ── 액션: 계급 ─────────────────────────────────────────────────────── */
   const updateRank = (id: number, patch: Partial<Rank>) => setRanks((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -195,9 +223,9 @@ export default function C0WorldWizard() {
   /* ── AI 자동 채움 ───────────────────────────────────────────────────── */
   const aiAutofill = async () => {
     setAiLoading(true); setGenrePickerOpen(false);
-    const synopsis = wizData.goal || "";
+    const synopsis = buildSynopsisFallback(wizData.goal, worldRules, genres);
     try {
-      const res = await suggestWorld({ era: eraVal, genres, synopsis, worldRules, factionCats: kit.factionCats });
+      const res = await suggestWorld({ era: eraVal, genres, synopsis, worldRules, factionCats: kit.factionCats, factionCount: factionCount ?? undefined, rankCount: rankCount ?? undefined, glossaryCount: glossaryCount ?? undefined });
       const rawFactions = res.factions.map((f) => ({ ...f, id: ++fid.current, costume: f.costume ?? "" }));
       // parentIndex → 실제 ID로 매핑
       const newFactions = rawFactions.map((f, i) => ({
@@ -244,7 +272,7 @@ export default function C0WorldWizard() {
   const mapAutoRecommend = async () => {
     setMapAutoLoading(true);
     try {
-      const res = await suggestWorld({ era: eraVal, genres, synopsis: wizData.goal || "", worldRules, factionCats: kit.factionCats });
+      const res = await suggestWorld({ era: eraVal, genres, synopsis: buildSynopsisFallback(wizData.goal, worldRules, genres), worldRules, factionCats: kit.factionCats });
       const rawFacs = factions.length ? factions : res.factions.map((f) => ({ ...f, id: ++fid.current, costume: (f as typeof f & { costume?: string }).costume ?? "" }));
       const newFactions = factions.length ? rawFacs : rawFacs.map((f, i) => ({
         ...f,
@@ -281,6 +309,30 @@ export default function C0WorldWizard() {
     } finally {
       setMapAutoLoading(false);
     }
+  };
+
+  const goNext = async () => {
+    const patch = {
+      era: eraVal, genres, worldRules, constraints: taboos,
+      glossaryDict: Object.fromEntries(glossary.filter((t) => t.term && t.meaning).map((t) => [t.term, t.meaning])),
+      worldFactions: factions.map((f) => f.name).filter(Boolean),
+      worldRanks: ranks.flatMap((r) => [r.name, ...r.variants]).filter(Boolean),
+      worldFactionsData: factions, worldRanksData: ranks,
+      worldRegions: regions, worldMapEdges: mapEdges, factionRelations, powerSystem,
+    };
+    saveWorld(patch);
+    if (wizData.editingNovelId) {
+      setSavingEdit(true);
+      try {
+        await updateNovel(wizData.editingNovelId, { settings: { ...wizData, ...patch } });
+      } catch {
+        showToast("저장에 실패했어요");
+        setSavingEdit(false);
+        return;
+      }
+      setSavingEdit(false);
+    }
+    navigate("/create");
   };
 
   /* ── 파생 계산 ──────────────────────────────────────────────────────── */
@@ -396,19 +448,59 @@ export default function C0WorldWizard() {
                 </div>
 
                 {/* AI generate — 시대·장르 설정 후 위치 */}
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3.5 rounded-lg border border-wash-border bg-wash px-[18px] py-4">
-                  <div className="min-w-[200px]">
+                <div className="mb-4 rounded-lg border border-wash-border bg-wash px-[18px] py-4">
+                  <div className="mb-3">
                     <div className="text-[15px] font-bold text-ink">막막하다면, AI에게 맡겨보세요</div>
-                    <div className="mt-[3px] text-[13px] text-ink2">시대·장르에 맞춰 세력·계급·용어 초안을 한 번에 채워드려요.</div>
+                    <div className="mt-[3px] text-[13px] text-ink2">시대·장르에 맞춰 세력·계급·용어 초안을 한 번에 채워드려요. 갯수도 직접 정할 수 있어요.</div>
                   </div>
-                  {aiLoading ? (
-                    <button disabled className="pw-btn-primary h-11 px-[18px] text-[15px] opacity-90" style={{ cursor: "default" }}>
-                      <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                      생성 중...
-                    </button>
-                  ) : (
-                    <button onClick={aiAutofill} className="pw-btn-primary h-11 whitespace-nowrap px-[18px] text-[15px]">✦ AI 세계관 자동 생성</button>
-                  )}
+                  <div className="mb-3.5 flex flex-wrap gap-x-5 gap-y-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[12px] font-bold text-muted">세력 수</span>
+                      {([null, 3, 5, 8, 12, 20] as const).map((n) => (
+                        <button
+                          key={n ?? "auto"}
+                          onClick={() => setFactionCount(n)}
+                          className={"h-7 min-w-[30px] rounded-md px-2 text-[13px] font-bold transition " + (factionCount === n ? "bg-brand text-white" : "bg-white border border-line2 text-ink2 hover:border-brand hover:text-brand")}
+                        >
+                          {n ?? "자동"}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[12px] font-bold text-muted">계급 수</span>
+                      {([null, 4, 6, 8, 12] as const).map((n) => (
+                        <button
+                          key={n ?? "auto"}
+                          onClick={() => setRankCount(n)}
+                          className={"h-7 min-w-[30px] rounded-md px-2 text-[13px] font-bold transition " + (rankCount === n ? "bg-brand text-white" : "bg-white border border-line2 text-ink2 hover:border-brand hover:text-brand")}
+                        >
+                          {n ?? "자동"}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[12px] font-bold text-muted">용어 수</span>
+                      {([null, 4, 8, 15, 25] as const).map((n) => (
+                        <button
+                          key={n ?? "auto"}
+                          onClick={() => setGlossaryCount(n)}
+                          className={"h-7 min-w-[30px] rounded-md px-2 text-[13px] font-bold transition " + (glossaryCount === n ? "bg-brand text-white" : "bg-white border border-line2 text-ink2 hover:border-brand hover:text-brand")}
+                        >
+                          {n ?? "자동"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    {aiLoading ? (
+                      <button disabled className="pw-btn-primary h-11 px-[18px] text-[15px] opacity-90" style={{ cursor: "default" }}>
+                        <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                        생성 중...
+                      </button>
+                    ) : (
+                      <button onClick={aiAutofill} className="pw-btn-primary h-11 whitespace-nowrap px-[18px] text-[15px]">✦ AI 세계관 자동 생성</button>
+                    )}
+                  </div>
                 </div>
 
                 {/* 국가·세력 */}
@@ -483,6 +575,52 @@ export default function C0WorldWizard() {
 
                   {factions.length === 0 && (
                     <div className="rounded-lg border border-dashed border-line2 p-[22px] text-center text-[13px] leading-relaxed text-muted">아직 정의한 세력이 없어요.<br />건너뛰어도 되며, 인물 단계에서 직접 입력할 수 있어요.</div>
+                  )}
+                </div>
+
+                {/* 세력관계 */}
+                <div className="pw-card mb-4 p-6">
+                  <div className="mb-1.5 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-bold text-ink">세력관계</span>
+                      <span className="text-[13px] font-bold text-muted">{factionRelations.length}개</span>
+                    </div>
+                    <button onClick={addFactionRelation} disabled={factions.length < 2} className={"h-[38px] px-3.5 text-sm " + (factions.length < 2 ? "pw-btn-disabled" : "pw-btn-slight")}>+ 세력관계 추가</button>
+                  </div>
+                  <div className="mb-4 text-[13px] text-muted">세력 간 우방·적대·중립 관계를 정해두면 전쟁·정치 서브플롯이 본문에 자연스럽게 반영돼요.</div>
+
+                  {factionRelations.map((fr) => (
+                    <div key={fr.id} className="mb-2.5 flex flex-wrap items-center gap-2.5 rounded-lg border border-hairline p-3.5">
+                      <div className="pw-select-wrap min-w-[120px] flex-1">
+                        <select value={fr.fromFactionId} onChange={(e) => updateFactionRelation(fr.id, { fromFactionId: e.target.value ? Number(e.target.value) : "" })} className="pw-select text-[14px]" style={{ height: 42 }}>
+                          <option value="">세력 선택</option>
+                          {factions.map((f) => <option key={f.id} value={f.id}>{f.name.trim() || "이름 미정"}</option>)}
+                        </select>
+                        <span className="pw-select-caret">▼</span>
+                      </div>
+                      <span className="text-muted">—</span>
+                      <div className="pw-select-wrap min-w-[120px] flex-1">
+                        <select value={fr.toFactionId} onChange={(e) => updateFactionRelation(fr.id, { toFactionId: e.target.value ? Number(e.target.value) : "" })} className="pw-select text-[14px]" style={{ height: 42 }}>
+                          <option value="">세력 선택</option>
+                          {factions.filter((f) => f.id !== fr.fromFactionId).map((f) => <option key={f.id} value={f.id}>{f.name.trim() || "이름 미정"}</option>)}
+                        </select>
+                        <span className="pw-select-caret">▼</span>
+                      </div>
+                      <div className="pw-select-wrap w-[100px] flex-shrink-0">
+                        <select value={fr.relation} onChange={(e) => updateFactionRelation(fr.id, { relation: e.target.value })} className="pw-select text-[14px]" style={{ height: 42 }}>
+                          {FACTION_REL_OPTIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                        <span className="pw-select-caret">▼</span>
+                      </div>
+                      <input value={fr.desc} onChange={(e) => updateFactionRelation(fr.id, { desc: e.target.value })} placeholder="설명 (선택)" className="h-[42px] min-w-[120px] flex-1 rounded border border-line2 bg-white px-2.5 text-[14px] text-ink outline-none focus:border-brand" />
+                      <button onClick={() => removeFactionRelation(fr.id)} className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded text-[15px] text-muted transition hover:bg-error-wash hover:text-error">×</button>
+                    </div>
+                  ))}
+
+                  {factionRelations.length === 0 && (
+                    <div className="rounded-lg border border-dashed border-line2 p-[22px] text-center text-[13px] leading-relaxed text-muted">
+                      {factions.length < 2 ? "세력을 2개 이상 추가하면 세력관계를 정할 수 있어요." : "아직 세력관계가 없어요. 건너뛰어도 돼요."}
+                    </div>
                   )}
                 </div>
 
@@ -759,7 +897,7 @@ export default function C0WorldWizard() {
             {!isMobile && (
               <div className="mt-5 flex items-center justify-between gap-3.5">
                 <button onClick={() => navigate("/create")} className="h-14 rounded px-[22px] text-base font-bold text-muted transition hover:bg-wash hover:text-brand">건너뛰기</button>
-                <button onClick={() => { saveWorld({ era: eraVal, genres, worldRules, constraints: taboos, glossaryDict: Object.fromEntries(glossary.filter(t => t.term && t.meaning).map(t => [t.term, t.meaning])), worldFactions: factions.map(f => f.name).filter(Boolean), worldRanks: ranks.flatMap(r => [r.name, ...r.variants]).filter(Boolean), worldFactionsData: factions, worldRanksData: ranks, worldRegions: regions, worldMapEdges: mapEdges, powerSystem }); navigate("/create"); }} className="pw-btn-primary h-14 px-7 text-lg">다음: 기본설정 →</button>
+                <button onClick={goNext} disabled={savingEdit} className="pw-btn-primary h-14 px-7 text-lg disabled:opacity-60">{savingEdit ? "저장 중..." : "다음: 기본설정 →"}</button>
               </div>
             )}
           </div>
@@ -893,7 +1031,7 @@ export default function C0WorldWizard() {
       {isMobile && (
         <div className="fixed inset-x-0 bottom-0 z-30 flex items-center gap-2.5 border-t border-hairline bg-white px-4 py-3 shadow-[0_-2px_12px_rgba(0,0,0,0.04)]">
           <button onClick={() => navigate("/create")} className="h-[54px] flex-shrink-0 rounded border border-line2 bg-white px-[18px] text-[15px] font-bold text-muted">건너뛰기</button>
-          <button onClick={() => { saveWorld({ era: eraVal, genres, worldRules, constraints: taboos, glossaryDict: Object.fromEntries(glossary.filter(t => t.term && t.meaning).map(t => [t.term, t.meaning])), worldFactions: factions.map(f => f.name).filter(Boolean), worldRanks: ranks.flatMap(r => [r.name, ...r.variants]).filter(Boolean), worldFactionsData: factions, worldRanksData: ranks, worldRegions: regions, worldMapEdges: mapEdges, powerSystem }); navigate("/create"); }} className="pw-btn-primary h-[54px] flex-1 text-base">다음: 기본설정 →</button>
+          <button onClick={goNext} disabled={savingEdit} className="pw-btn-primary h-[54px] flex-1 text-base disabled:opacity-60">{savingEdit ? "저장 중..." : "다음: 기본설정 →"}</button>
         </div>
       )}
 

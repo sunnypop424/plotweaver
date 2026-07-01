@@ -82,6 +82,9 @@ class StoryBible:
     glossary: dict = field(default_factory=dict)       # 고유명사 사전
     open_threads: list = field(default_factory=list)   # 작품 전역 미회수 복선
     summaries: list = field(default_factory=list)      # list[ChapterSummary]
+    # 최초 회차 생성 시점의 총 회차 수 스냅샷. 이후 사용자가 totalChapters를 바꿔도
+    # 이미 진행 중인 작품의 스테이지(발단/전개/위기/절정) 계산 기준이 흔들리지 않게 고정한다.
+    total_chapters: int | None = None
 
 
 # ── 로더 ────────────────────────────────────────────────────────────────

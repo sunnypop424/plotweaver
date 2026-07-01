@@ -132,9 +132,9 @@ export function getNovel(novelId: string) {
 }
 
 // ── 생성 ──────────────────────────────────────────────────────────────
-export function generateChapter(novelId: string, seq = 1) {
+export function generateChapter(novelId: string, seq = 1, userNote?: string) {
   return request<{ seq: number; content: string; word_count: number }>(
-    "POST", `/api/novels/${novelId}/chapters`, { seq }
+    "POST", `/api/novels/${novelId}/chapters`, { seq, user_note: userNote || undefined }
   );
 }
 
@@ -171,11 +171,11 @@ export interface RelationsSuggestion {
   }[];
 }
 
-export function suggestWorld(params: { era: string; genres: string[]; synopsis: string; worldRules: string; factionCats?: string[] }) {
+export function suggestWorld(params: { era: string; genres: string[]; synopsis: string; worldRules: string; factionCats?: string[]; factionCount?: number; rankCount?: number; glossaryCount?: number }) {
   return request<WorldSuggestion>("POST", "/api/suggest/world", params);
 }
 
-export function suggestRelations(params: { characters: NovelSettings["characters"]; goal: string; conflict: string; totalChapters: number; storyFlow?: { 발단: string; 전개: string; 위기: string; 절정: string }; prompt?: string; existingEdges?: RelationsSuggestion["edges"] }) {
+export function suggestRelations(params: { characters: NovelSettings["characters"]; goal: string; conflict: string; totalChapters: number; storyFlow?: { 발단: string; 전개: string; 위기: string; 절정: string }; prompt?: string; existingEdges?: RelationsSuggestion["edges"]; worldRules?: string; factionRelations?: { fromFaction: string; toFaction: string; relation: string }[] }) {
   return request<RelationsSuggestion>("POST", "/api/suggest/relations", params);
 }
 
@@ -191,7 +191,7 @@ export interface NarrativeSuggestion {
   ki: string; seung: string; jeon: string; gyeol: string;
 }
 
-export function suggestNarrative(params: { era: string; genres: string[]; goal: string; conflict: string; ending?: string; emotionalGoal?: string; referenceWork?: string; synopsis?: string; characters: string[]; worldRules?: string; relationships?: { fromChar: string; toChar: string; relation: string }[] }) {
+export function suggestNarrative(params: { era: string; genres: string[]; goal: string; conflict: string; ending?: string; emotionalGoal?: string; referenceWork?: string; synopsis?: string; characters: { name: string; role: string; personality?: string }[]; worldRules?: string; relationships?: { fromChar: string; toChar: string; relation: string }[]; foreshadowing?: { hint: string; revealChapter: number }[]; chapterRhythm?: { eventEveryN?: string; maxOpenThreads?: string; note?: string } }) {
   return request<NarrativeSuggestion>("POST", "/api/suggest/narrative", params);
 }
 
@@ -199,7 +199,7 @@ export function updateChapter(novelId: string, seq: number, content: string) {
   return request<{ ok: boolean }>("PUT", `/api/novels/${novelId}/chapters/${seq}`, { content });
 }
 
-export function suggestTitle(params: { era: string; genres: string[]; goal: string; conflict: string; characters: NovelSettings["characters"]; pov: string; ending: string }) {
+export function suggestTitle(params: { era: string; genres: string[]; goal: string; conflict: string; characters: NovelSettings["characters"]; pov: string; ending: string; worldFactions?: string[]; relationships?: { fromChar: string; toChar: string; relation: string }[]; emotionalGoal?: string; referenceWork?: string; cliffhangerStyle?: string }) {
   return request<{ titles: string[] }>("POST", "/api/suggest/title", params);
 }
 

@@ -87,6 +87,7 @@ export default function C4EditorViewer() {
   const [reviewRound, setReviewRound] = useState(0);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [contribution, setContribution] = useState(18);
+  const [authorNote, setAuthorNote] = useState("");
 
   const cur = chapters.find((c) => c.id === currentId) ?? chapters[0];
 
@@ -159,7 +160,7 @@ export default function C4EditorViewer() {
     if (regenerating || !novelId) { if (!novelId) showToast("작품 ID가 없어요. 다시 생성해주세요."); return; }
     setRegenerating(true); setMode("read");
     try {
-      const res = await generateChapter(novelId, cur.num);
+      const res = await generateChapter(novelId, cur.num, authorNote);
       setChapters((cs) => cs.map((c) => (c.id === currentId ? { ...c, body: res.content } : c)));
       setSavedAt(Date.now());
       showToast("이 회차를 다시 생성했어요");
@@ -174,7 +175,7 @@ export default function C4EditorViewer() {
     setGeneratingNext(true); setDrawerOpen(false);
     const nextNum = chapters.length + 1;
     try {
-      const res = await generateChapter(novelId, nextNum);
+      const res = await generateChapter(novelId, nextNum, authorNote);
       const id = ++cid.current;
       setChapters((cs) => [...cs, { id, num: nextNum, title: `${nextNum}화`, body: res.content }]);
       setCurrentId(id); setMode("read");
@@ -318,8 +319,20 @@ export default function C4EditorViewer() {
               </>
             )}
 
+            {/* 작가 추가 지시 — 재생성·다음 화 생성 시 함께 반영 */}
+            <div className="mt-6 rounded-lg border border-hairline bg-canvas p-3.5">
+              <div className="mb-1.5 text-[13px] font-bold text-ink">✦ 작가 추가 지시 <span className="font-normal text-muted">선택 · 재생성·다음 회차 생성에 반영돼요</span></div>
+              <textarea
+                value={authorNote}
+                onChange={(e) => setAuthorNote(e.target.value)}
+                rows={2}
+                placeholder="예: 이번 화는 액션 비중을 늘려줘. 대사보다 전투 묘사에 집중해줘."
+                className="w-full resize-none rounded-lg border border-hairline bg-white px-3 py-2.5 text-[13px] leading-relaxed text-ink outline-none transition placeholder:text-muted/50 focus:border-brand focus:shadow-focus"
+              />
+            </div>
+
             {/* actions */}
-            <div className="mt-7 flex flex-wrap items-center justify-between gap-3 border-t border-hairline pt-5">
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-hairline pt-5">
               <div className="flex flex-wrap gap-2">
                 <button onClick={partialEdit} className="inline-flex h-11 items-center gap-1.5 rounded border border-line2 bg-white px-4 text-sm font-bold text-ink2 transition hover:border-brand hover:bg-canvas hover:text-brand">편집 모드</button>
                 <button onClick={regenerate} className="inline-flex h-11 items-center gap-1.5 rounded border border-line2 bg-white px-4 text-sm font-bold text-ink2 transition hover:border-brand hover:bg-canvas hover:text-brand">재생성</button>

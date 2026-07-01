@@ -5,7 +5,7 @@ import { RadioPill } from "@/components/ui/RadioPill";
 import { useToast } from "@/components/Toast";
 import { useViewport } from "@/lib/useViewport";
 import { useWizard } from "@/providers/WizardProvider";
-import { suggestCharacters } from "@/lib/api";
+import { suggestCharacters, updateNovel } from "@/lib/api";
 
 /* ── 옵션 데이터 (02·03) ─────────────────────────────────────────────── */
 const APPEARANCE_OPTIONS = ["은발 장신", "붉은 머리", "흑발 단신", "금발의 미인", "평범한 인상"];
@@ -72,6 +72,7 @@ export default function C1SettingsWizard() {
 
   const [aiLoading, setAiLoading] = useState(false);
   const [aiCount, setAiCount] = useState(5);
+  const [savingEdit, setSavingEdit] = useState(false);
   const [characters, setCharacters] = useState<Character[]>(() => {
     const wc = wizData.characters;
     if (!wc.length) return [newChar(1)];
@@ -184,6 +185,23 @@ export default function C1SettingsWizard() {
   const charsFilled = characters.length > 0 && characters.every((c) => c.name.trim());
   const valid = charsFilled;
 
+  const goNext = async () => {
+    const patch = { characters: serializeChars() };
+    saveCharacters(patch.characters);
+    if (wizData.editingNovelId) {
+      setSavingEdit(true);
+      try {
+        await updateNovel(wizData.editingNovelId, { settings: { ...wizData, ...patch } });
+      } catch {
+        showToast("저장에 실패했어요");
+        setSavingEdit(false);
+        return;
+      }
+      setSavingEdit(false);
+    }
+    navigate("/create/relations");
+  };
+
   const showSide = isDesktop;
 
   return (
@@ -277,11 +295,11 @@ export default function C1SettingsWizard() {
               <div className="flex items-center gap-3.5">
                 {!valid && <span className="text-[13px] font-bold text-muted">인물 이름을 채우면 다음으로 넘어갈 수 있어요.</span>}
                 <button
-                  disabled={!valid}
-                  onClick={() => { saveCharacters(serializeChars()); navigate("/create/relations"); }}
+                  disabled={!valid || savingEdit}
+                  onClick={goNext}
                   className={(valid ? "pw-btn-primary" : "pw-btn-disabled") + " h-14 px-7 text-lg"}
                 >
-                  다음: 관계도 →
+                  {savingEdit ? "저장 중..." : "다음: 관계도 →"}
                 </button>
               </div>
             </div>
@@ -338,11 +356,11 @@ export default function C1SettingsWizard() {
           <div className="flex gap-2.5">
             <button onClick={() => navigate("/create/world")} className="h-[54px] flex-shrink-0 rounded border border-line2 bg-white px-[18px] text-[15px] font-bold text-ink2">← 이전</button>
             <button
-              disabled={!valid}
-              onClick={() => { saveCharacters(serializeChars()); navigate("/create/relations"); }}
+              disabled={!valid || savingEdit}
+              onClick={goNext}
               className={(valid ? "pw-btn-primary" : "pw-btn-disabled") + " h-[54px] flex-1 text-base"}
             >
-              다음: 관계도 →
+              {savingEdit ? "저장 중..." : "다음: 관계도 →"}
             </button>
           </div>
         </div>

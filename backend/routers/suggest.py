@@ -50,6 +50,29 @@ def _parse_json(text: str) -> dict:
     raise HTTPException(status_code=502, detail="AI 응답 파싱 실패")
 
 
+_CHAR_FIELD_LABELS = {
+    "personality": "성격", "trait": "특징", "desire": "욕망",
+    "fear": "두려움", "mannerism": "말버릇", "secret": "비밀", "faction": "소속",
+}
+
+
+def _format_characters(characters: list, fields: list[str] | None = None) -> str:
+    """캐릭터 객체 목록을 '{i}. 이름(역할) - 필드=값, ...' 프롬프트 텍스트로 변환.
+    suggest_relations/suggest_narrative/suggest_title이 공유하는 단일 포맷터 — 어떤 필드를
+    얼마나 보여줄지만 fields로 조절해, 엔드포인트마다 캐릭터 정보 전달 수준이 들쭉날쭉해지는 걸 막는다."""
+    fields = fields or ["personality", "trait"]
+    lines = []
+    for i, c in enumerate(characters):
+        role = c.get("role")
+        role_label = "주인공" if role == "protagonist" else ("악역" if role == "villain" else "조연")
+        details = ", ".join(f"{_CHAR_FIELD_LABELS[f]}={c[f]}" for f in fields if c.get(f))
+        line = f"{i}. {c.get('name', '?')} ({role_label})"
+        if details:
+            line += f" - {details}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 @router.post("/world")
 async def suggest_world(body: dict = Body(...), user=Depends(get_current_user)):
     era = body.get("era", "")
@@ -57,6 +80,25 @@ async def suggest_world(body: dict = Body(...), user=Depends(get_current_user)):
     synopsis = body.get("synopsis", "")
     world_rules = body.get("worldRules", "")
     faction_cats = body.get("factionCats", [])
+
+    # 사용자가 직접 갯수를 지정할 수 있도록 — 안 정했으면(None) AI가 알아서 정하되 AUTO_CAP개를 넘지 않게
+    AUTO_CAP = 12
+
+    def _bounded_count(raw, cap):
+        if raw is None or raw == "":
+            return None
+        try:
+            return max(2, min(int(raw), cap))
+        except (TypeError, ValueError):
+            return None
+
+    faction_count = _bounded_count(body.get("factionCount"), 30)
+    rank_count = _bounded_count(body.get("rankCount"), 20)
+    glossary_count = _bounded_count(body.get("glossaryCount"), 50)
+
+    faction_instr = f"정확히 {faction_count}개" if faction_count else f"이야기에 어울리게 알아서 정하되 {AUTO_CAP}개를 넘지 않게"
+    rank_instr = f"정확히 {rank_count}개" if rank_count else f"알아서 정하되 {AUTO_CAP}개를 넘지 않게"
+    glossary_instr = f"정확히 {glossary_count}개" if glossary_count else f"알아서 정하되 {AUTO_CAP}개를 넘지 않게"
 
     cats_instr = f"반드시 아래 분류 중 하나만 사용하세요: {', '.join(faction_cats)}" if faction_cats else "배경에 맞는 분류를 자유롭게 사용하세요"
 
@@ -91,17 +133,24 @@ async def suggest_world(body: dict = Body(...), user=Depends(get_current_user)):
 }}
 
 [핵심 조건]
-- factions 3~5개, glossary 4~6개, regions 각 세력 거점 + 중립지대(factionIndex=-1), mapEdges 2~4개
+- factions {faction_instr}, glossary {glossary_instr}, regions 각 세력 거점 + 중립지대(factionIndex=-1), mapEdges 2~{max(4, min(faction_count or AUTO_CAP, 10))}개
 - parentIndex: 상위 소속 세력이 있으면 factions 배열 내 0-기반 인덱스, 없으면 -1
 - costume: 이 세력·집단의 단체 복식·의상을 1문장으로 묘사. 교복·단복·갑옷 등. 없으면 ""
 - ranks는 반드시 factions에서 사용한 수장 직함(leader)을 최상위 계급으로 포함해야 합니다.
   예) 세력 수장이 "장문인"이면 ranks에 {{"name":"장문인","desc":"문파 최고 수장","variants":[]}}가 있어야 합니다.
-- ranks 전체 계급은 모든 세력을 아우르는 통합 체계로 4~6개, 상위→하위 순으로 작성
+- ranks 전체 계급은 모든 세력을 아우르는 통합 체계로 {rank_instr}, 상위→하위 순으로 작성
+- 갯수를 직접 지정한 항목은 그 갯수를 최대한 정확히 맞추고, 지정하지 않은 항목(알아서 정하는 항목)은 이야기 규모에 맞게 자연스럽게 구성하되 {AUTO_CAP}개는 넘기지 마세요. 어떤 경우든 각 항목이 서로 겹치지 않고 실제로 의미 있게 구별되도록 다양하게 구성
 - 모두 한국어, 시대/장르에 맞는 용어 사용"""
+
+    # 요청한(또는 자동 상한 기준) 갯수에 비례해 출력 토큰 상한을 동적으로 계산 — 갯수를 늘렸는데 응답이 잘리는 일이 없도록
+    dynamic_tokens = min(
+        2000 + (faction_count or AUTO_CAP) * 250 + (rank_count or AUTO_CAP) * 150 + (glossary_count or AUTO_CAP) * 100,
+        16000,
+    )
 
     msg = _ai().messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=8000,
+        max_tokens=dynamic_tokens,
         messages=[{"role": "user", "content": prompt}],
     )
     if msg.stop_reason == "max_tokens":
@@ -139,14 +188,25 @@ async def suggest_relations(body: dict = Body(...), user=Depends(get_current_use
     story_flow = body.get("storyFlow", {})
     user_prompt = (body.get("prompt") or "").strip()
     existing_edges = body.get("existingEdges", [])
+    world_rules = body.get("worldRules", "")
+    faction_relations = body.get("factionRelations", [])
 
     if len(characters) < 2:
         return {"edges": []}
 
-    char_lines = "\n".join(
-        f"{i}. {c.get('name','?')} ({'주인공' if c.get('role')=='protagonist' else '조연/악역'}) - {c.get('personality','')}"
-        for i, c in enumerate(characters)
-    )
+    char_lines = _format_characters(characters, fields=["faction", "personality", "trait", "desire", "fear", "mannerism", "secret"])
+
+    # 세계관 컨텍스트 — 세력관계가 있으면 소속 세력이 다른 인물 간 관계에 영향을 주도록 유도
+    world_context = ""
+    if world_rules:
+        world_context += f"\n세계관: {world_rules[:200]}"
+    if isinstance(faction_relations, list) and faction_relations:
+        fr_lines = [
+            f"  - {fr.get('fromFaction')} — {fr.get('toFaction')}: {fr.get('relation')}"
+            for fr in faction_relations if fr.get("fromFaction") and fr.get("toFaction") and fr.get("relation")
+        ]
+        if fr_lines:
+            world_context += "\n세력 관계 (인물의 소속 세력이 아래에 해당하면 관계에 영향을 줄 것):\n" + "\n".join(fr_lines)
 
     # 현재 관계도(있다면) — 프롬프트로 수정/보완할 때 기준선으로 사용
     existing_str = ""
@@ -199,7 +259,7 @@ async def suggest_relations(body: dict = Body(...), user=Depends(get_current_use
 
 주인공 목표: {goal or '없음'}
 핵심 갈등: {conflict or '없음'}
-총 회차: {total_chapters}{flow_lines}{existing_str}{prompt_instr}
+총 회차: {total_chapters}{flow_lines}{world_context}{existing_str}{prompt_instr}
 
 반드시 아래 JSON만 응답하세요:
 
@@ -224,6 +284,7 @@ async def suggest_relations(body: dict = Body(...), user=Depends(get_current_use
 - ep 범위: 1~{total_chapters}
 - direction: "both"(양방향) 또는 "one"(단방향)
 - 서사 흐름(발단→전개→위기→절정)에 맞게 관계 변화 시점을 배치
+- 세력 관계가 주어졌다면, 서로 다른 세력 소속 인물 간에는 그 세력 관계(우방/적대/중립)를 관계 설정에 반영
 - 한국어로 작성"""
 
     # 인물 수에 따라 토큰 동적 증가: 쌍 수 = N*(N-1)/2 × 약 100토큰 + 여유
@@ -337,8 +398,27 @@ async def suggest_narrative(body: dict = Body(...), user=Depends(get_current_use
     characters = body.get("characters", [])
     world_rules = body.get("worldRules", "")
     relationships = body.get("relationships", [])
+    foreshadowing = body.get("foreshadowing", [])
+    chapter_rhythm = body.get("chapterRhythm", {})
 
-    char_str = ", ".join(characters) if characters else "미정"
+    char_str = _format_characters(characters, fields=["personality", "trait"]) if characters else "미정"
+
+    fs_str = ""
+    if isinstance(foreshadowing, list) and foreshadowing:
+        fs_lines = [f"  - {f.get('hint','')} (→ {f.get('revealChapter', 0)}화 회수 예정)" for f in foreshadowing if f.get("hint")]
+        if fs_lines:
+            fs_str = "\n계획된 복선 (아래 회차 즈음 자연스럽게 회수되도록 4단 구조에 반영):\n" + "\n".join(fs_lines)
+
+    rhythm_str = ""
+    if isinstance(chapter_rhythm, dict) and (chapter_rhythm.get("eventEveryN") or chapter_rhythm.get("maxOpenThreads") or chapter_rhythm.get("note")):
+        rhythm_parts = []
+        if chapter_rhythm.get("eventEveryN"):
+            rhythm_parts.append(f"매 {chapter_rhythm['eventEveryN']}화마다 큰 사건·전환점 배치")
+        if chapter_rhythm.get("maxOpenThreads"):
+            rhythm_parts.append(f"동시 열린 복선은 {chapter_rhythm['maxOpenThreads']}개 이내로 유지")
+        if chapter_rhythm.get("note"):
+            rhythm_parts.append(chapter_rhythm["note"])
+        rhythm_str = "\n회차 패턴: " + " / ".join(rhythm_parts)
 
     rel_str = ""
     if relationships:
@@ -364,8 +444,9 @@ async def suggest_narrative(body: dict = Body(...), user=Depends(get_current_use
 배경: {era} / 장르: {', '.join(genres) if genres else '미정'}
 주인공 목표: {goal or '없음'}
 핵심 갈등: {conflict or '없음'}
-등장인물: {char_str}{rel_str}
-세계 규칙: {world_rules or '없음'}{extra_str}
+등장인물:
+{char_str}{rel_str}
+세계 규칙: {world_rules or '없음'}{extra_str}{fs_str}{rhythm_str}
 
 반드시 아래 JSON만 응답하세요:
 
@@ -378,6 +459,8 @@ async def suggest_narrative(body: dict = Body(...), user=Depends(get_current_use
 
 조건:
 - 등장인물 이름을 직접 언급해 일관성 있게 작성
+- 계획된 복선이 있다면 해당 회차 즈음 자연스럽게 회수되도록 각 단계 내용에 반영
+- 회차 패턴이 있다면 단계별 사건 밀도·복선 개수에 반영
 - 세계 규칙에 어긋나지 않는 내용으로 구성
 - 한국어로, 장르 분위기에 맞게 작성"""
 
@@ -401,9 +484,32 @@ async def suggest_title(body: dict = Body(...), user=Depends(get_current_user)):
     characters = body.get("characters", [])
     pov = body.get("pov", "")
     ending = body.get("ending", "")
+    world_factions = body.get("worldFactions", [])
+    relationships = body.get("relationships", [])
+    emotional_goal = body.get("emotionalGoal", "")
+    reference_work = body.get("referenceWork", "")
+    cliffhanger_style = body.get("cliffhangerStyle", "")
 
     protagonist = next((c for c in characters if c.get("role") == "protagonist"), None)
     hero_name = protagonist.get("name", "") if protagonist else ""
+
+    extra_lines = []
+    if world_factions:
+        extra_lines.append(f"소속 세력: {', '.join(world_factions)}")
+    if relationships:
+        rel_str = ", ".join(
+            f"{r.get('fromChar','?')}↔{r.get('toChar','?')}: {r.get('relation','')}"
+            for r in relationships[:4] if r.get("relation")
+        )
+        if rel_str:
+            extra_lines.append(f"주요 관계: {rel_str}")
+    if emotional_goal:
+        extra_lines.append(f"독자 감정 목표: {emotional_goal}")
+    if reference_work:
+        extra_lines.append(f"참고 분위기: {reference_work}")
+    if cliffhanger_style:
+        extra_lines.append(f"클리프행어 스타일: {cliffhanger_style}")
+    extra_block = ("\n" + "\n".join(extra_lines)) if extra_lines else ""
 
     prompt = f"""당신은 한국 웹소설 제목 카피라이터입니다. 첫 줄만 보고도 클릭하게 만드는 '후킹 제목'을 뽑습니다.
 아래 설정에 맞는 제목 후보 6개를 JSON으로 만들어주세요.
@@ -415,7 +521,7 @@ async def suggest_title(body: dict = Body(...), user=Depends(get_current_user)):
 목표: {goal or '없음'}
 갈등: {conflict or '없음'}
 결말 방향: {ending or '없음'}
-시점: {pov or '없음'}
+시점: {pov or '없음'}{extra_block}
 
 [요즘 한국 웹소설 제목 트렌드 — 참고만, 베끼지 말 것]
 - 상황·반전을 한 문장으로 압축한 '문장형' 제목이 대세

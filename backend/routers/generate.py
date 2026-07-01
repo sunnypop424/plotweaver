@@ -24,16 +24,10 @@ from models import (
 
 router = APIRouter()
 
-STAGES = ["발단", "전개", "위기", "절정"]
-STAGE_BOUNDS = [(0.0, 0.25), (0.25, 0.60), (0.60, 0.85), (0.85, 1.0001)]
-
 
 def _ep_to_stage(ep: int, total: int) -> str:
-    frac = (ep - 1) / max(total, 1)
-    for i, (lo, hi) in enumerate(STAGE_BOUNDS):
-        if lo <= frac < hi:
-            return STAGES[i]
-    return STAGES[-1]
+    # engine.stage_of와 동일한 계산 — 엔진 쪽 구현을 그대로 재사용해 중복을 없앤다.
+    return engine.stage_of(ep, total)
 
 
 def _char_trait(c: dict) -> str:
@@ -52,8 +46,10 @@ def _char_trait(c: dict) -> str:
     return " / ".join(parts) if parts else ""
 
 
-def _build_novel(settings: dict) -> NovelSettings:
-    """위저드 settings dict → engine NovelSettings"""
+def _build_novel(settings: dict, total_chapters_override: int | None = None) -> NovelSettings:
+    """위저드 settings dict → engine NovelSettings.
+    total_chapters_override: 스토리 바이블에 스냅샷된 총회차가 있으면 그 값을 우선 사용
+    (settings.totalChapters를 나중에 바꿔도 이미 진행 중인 작품의 스테이지 계산은 고정)."""
     chars = [
         Character(
             name=c["name"],
@@ -69,7 +65,7 @@ def _build_novel(settings: dict) -> NovelSettings:
         for c in settings.get("characters", [])
     ]
 
-    total = settings.get("totalChapters", 10)
+    total = total_chapters_override if total_chapters_override is not None else settings.get("totalChapters", 10)
     rels = []
     for r in settings.get("relationships", []):
         tl_raw = r.get("timeline", [])
@@ -122,6 +118,55 @@ def _build_novel(settings: dict) -> NovelSettings:
     ]
     if costume_lines:
         extra_parts.append("[단체 의상]\n" + "\n".join(costume_lines))
+
+    # 세력 id → 이름 매핑 (지역 소속·세력관계 표기에 재사용)
+    faction_name_by_id = {f["id"]: f["name"] for f in world_factions_data if f.get("id") is not None and f.get("name")}
+
+    # 월드맵(지역·지역간 연결) — 위저드에서 입력되지만 지금까지 생성에 전혀 반영되지 않던 데이터
+    world_regions = settings.get("worldRegions", [])
+    region_name_by_id = {r["id"]: r["name"] for r in world_regions if r.get("id") is not None and r.get("name")}
+    region_lines = []
+    for r in world_regions:
+        name = r.get("name")
+        if not name:
+            continue
+        faction_name = faction_name_by_id.get(r.get("factionId"))
+        label = f"  - {name}" + (f"({faction_name} 거점)" if faction_name else "")
+        if r.get("desc"):
+            label += f": {r['desc']}"
+        region_lines.append(label)
+    if region_lines:
+        extra_parts.append("[지역]\n" + "\n".join(region_lines))
+
+    world_map_edges = settings.get("worldMapEdges", [])
+    edge_lines = []
+    for e in world_map_edges:
+        from_name = region_name_by_id.get(e.get("from"))
+        to_name = region_name_by_id.get(e.get("to"))
+        if not from_name or not to_name:
+            continue
+        line = f"  - {from_name}—{to_name}: {e.get('label', '')}"
+        if e.get("desc"):
+            line += f" ({e['desc']})"
+        edge_lines.append(line)
+    if edge_lines:
+        extra_parts.append("[지역 연결]\n" + "\n".join(edge_lines))
+
+    # 세력 간 관계(우방/적대/중립) — 인물 관계도와 별개로, 세력 단위 정치 구도를 본문에 반영
+    faction_relations = settings.get("factionRelations", [])
+    faction_rel_lines = []
+    for fr in faction_relations:
+        from_name = faction_name_by_id.get(fr.get("fromFactionId"))
+        to_name = faction_name_by_id.get(fr.get("toFactionId"))
+        if not from_name or not to_name or not fr.get("relation"):
+            continue
+        line = f"  - {from_name} — {to_name}: {fr['relation']}"
+        if fr.get("desc"):
+            line += f" ({fr['desc']})"
+        faction_rel_lines.append(line)
+    if faction_rel_lines:
+        extra_parts.append("[세력관계]\n" + "\n".join(faction_rel_lines))
+
     if extra_parts:
         world_rules = (world_rules + "\n" if world_rules else "") + "\n".join(extra_parts)
     if glossary_text:
@@ -172,6 +217,7 @@ def _bible_from_db(data: dict) -> StoryBible:
         glossary=data.get("glossary", {}),
         open_threads=data.get("open_threads", []),
         summaries=summaries,
+        total_chapters=data.get("total_chapters"),
     )
 
 
@@ -189,7 +235,20 @@ def _bible_to_dict(bible: StoryBible) -> dict:
         ],
         "open_threads": bible.open_threads,
         "glossary": bible.glossary,
+        "total_chapters": bible.total_chapters,
     }
+
+
+def _load_bible(settings: dict, bible_data: dict) -> StoryBible:
+    """DB의 story_bibles.data를 로드하고, 바이블 글로서리가 아직 비어있으면
+    위저드에서 입력한 glossaryDict로 1회 시딩한다 — 지금까지 서로 무관했던
+    두 용어사전(위저드 glossaryDict / 자동추출 bible.glossary)을 연결하는 지점."""
+    bible = _bible_from_db(bible_data)
+    if not bible.glossary:
+        glossary_dict = settings.get("glossaryDict")
+        if glossary_dict:
+            bible.glossary = dict(glossary_dict)
+    return bible
 
 
 def _extract_new_chars(text: str, settings: dict, novel_id: str, db) -> None:
@@ -253,6 +312,7 @@ def _extract_new_chars(text: str, settings: dict, novel_id: str, db) -> None:
 
 class GenerateChapterRequest(BaseModel):
     seq: int = 1
+    user_note: str = ""
 
 
 class UpdateChapterRequest(BaseModel):
@@ -262,10 +322,28 @@ class UpdateChapterRequest(BaseModel):
 @router.put("/novels/{novel_id}/chapters/{seq}")
 def update_chapter(novel_id: str, seq: int, body: UpdateChapterRequest, user=Depends(get_current_user)):
     db = get_db()
-    row = db.table("novels").select("id").eq("id", novel_id).eq("author_id", str(user.id)).single().execute()
+    row = db.table("novels").select("*").eq("id", novel_id).eq("author_id", str(user.id)).single().execute()
     if not row.data:
         raise HTTPException(status_code=404, detail="작품을 찾을 수 없습니다")
     db.table("chapters").update({"content": body.content}).eq("novel_id", novel_id).eq("seq", seq).execute()
+
+    # 수동 편집도 스토리 바이블에 반영 — 이전에는 AI 생성 경로에서만 요약이 갱신돼서,
+    # 사람이 크게 고친 회차라도 다음 화 생성 시 AI의 원래 초안 기준으로 이어졌음.
+    try:
+        settings = row.data["settings"] or {}
+        novel = _build_novel(settings)
+        bible_row = db.table("story_bibles").select("data").eq("novel_id", novel_id).single().execute()
+        bible_data = bible_row.data["data"] if bible_row.data else {}
+        bible = _load_bible(settings, bible_data)
+        engine.writeback(novel, seq, body.content, bible)
+        db.table("story_bibles").upsert({
+            "novel_id": novel_id,
+            "data": _bible_to_dict(bible),
+            "updated_at": "NOW()",
+        }, on_conflict="novel_id").execute()
+    except Exception:
+        pass  # 요약 갱신 실패가 저장 자체를 막지 않도록
+
     return {"ok": True}
 
 
@@ -281,16 +359,22 @@ def generate_chapter(novel_id: str, body: GenerateChapterRequest, user=Depends(g
         raise HTTPException(status_code=404, detail="작품을 찾을 수 없습니다")
 
     settings = novel_row.data["settings"]
-    novel = _build_novel(settings)
 
-    # 2. 스토리 바이블 조회
+    # 2. 스토리 바이블 조회 (novel 조립보다 먼저 — 총회차 스냅샷을 확인해야 하므로)
     bible_row = db.table("story_bibles").select("data").eq("novel_id", novel_id).single().execute()
     bible_data = bible_row.data["data"] if bible_row.data else {}
-    bible = _bible_from_db(bible_data)
+    bible = _load_bible(settings, bible_data)
+
+    # 최초 생성 시점(스냅샷 없음)에만 현재 totalChapters를 고정 — 이후 설정에서 총회차를
+    # 바꿔도 이미 진행 중인 작품의 스테이지(발단/전개/위기/절정) 계산이 흔들리지 않게 한다.
+    if bible.total_chapters is None:
+        bible.total_chapters = settings.get("totalChapters", 10)
+
+    novel = _build_novel(settings, total_chapters_override=bible.total_chapters)
 
     # 3. 회차 생성 (동기, ~20-40초)
     try:
-        text, _ = engine.generate_chapter(novel, body.seq, bible)
+        text, _ = engine.generate_chapter(novel, body.seq, bible, user_note=body.user_note)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"생성 실패: {str(e)}")
 
@@ -608,6 +692,70 @@ def generate_cover(novel_id: str, body: dict = Body(default={}), user=Depends(ge
                     rel_tones.append(mood)
                     break
 
+    # 세력관계 — 주인공 소속 세력이 걸린 관계가 있으면 정치적 분위기 힌트로 반영
+    world_factions_data = settings.get("worldFactionsData", [])
+    faction_name_by_id = {f["id"]: f["name"] for f in world_factions_data if f.get("id") is not None and f.get("name")}
+    protagonist_faction = next(
+        (c.get("faction", "") for c in settings.get("characters", []) if c.get("role") == "protagonist"), ""
+    )
+    FACTION_REL_MOOD = {
+        "우방": "an allied, cooperative atmosphere between factions",
+        "적대": "a hostile, warlike tension between rival factions",
+        "중립": "a wary, uneasy neutrality between factions",
+    }
+    faction_mood = ""
+    for fr in settings.get("factionRelations", []):
+        from_name = faction_name_by_id.get(fr.get("fromFactionId"))
+        to_name = faction_name_by_id.get(fr.get("toFactionId"))
+        if not from_name or not to_name or not protagonist_faction:
+            continue
+        if protagonist_faction in (from_name, to_name):
+            faction_mood = FACTION_REL_MOOD.get(fr.get("relation"), "")
+            if faction_mood:
+                break
+
+    # 감정 목표 → 분위기 힌트
+    EMOTION_MOOD = {
+        "통쾌함": "triumphant, exhilarating energy",
+        "설렘": "a fluttering, tender anticipation",
+        "슬픔": "a melancholic, sorrowful mood",
+        "공포": "an ominous, dreadful atmosphere",
+        "긴장감": "a tense, suspenseful atmosphere",
+        "감동": "a poignant, moving warmth",
+    }
+    emotional_goal = settings.get("emotionalGoal", "")
+    emotion_mood = EMOTION_MOOD.get(emotional_goal, "")
+
+    # 클리프행어 스타일 → 구도 힌트 (알려지지 않은 값이어도 범용 폴백)
+    CLIFF_VISUAL_MAP = {
+        "반전형": "a mysterious composition hinting at a hidden secret or unexpected reveal",
+        "의문형": "an enigmatic composition with an obscured or shadowed element",
+        "감정형": "an emotionally intense close-up expression",
+        "행동형": "a dynamic, decisive action pose",
+    }
+    cliffhanger_style = settings.get("cliffhangerStyle", "").strip()
+    cliff_visual = CLIFF_VISUAL_MAP.get(cliffhanger_style, "a gripping, suspenseful composition") if cliffhanger_style else ""
+
+    # 참고 작품·분위기 (특정 캐릭터·장면을 베끼라는 지시가 아니라 '분위기' 수준으로만 반영)
+    reference_work = settings.get("referenceWork", "").strip()
+
+    # 파워시스템 — 주인공의 현재 등급을 시각적 단서로
+    power_system = settings.get("powerSystem") or {}
+    power_hint = ""
+    if power_system.get("enabled") and power_system.get("protagonistRank"):
+        power_hint = f"visual cues suggesting the protagonist's power tier: {power_system['protagonistRank']}"
+
+    # 월드맵 지역 — 주인공 소속 세력의 거점 지역 묘사를 배경 분위기로 (가벼운 터치, 없으면 생략)
+    region_hint = ""
+    protagonist_faction_id = next((f["id"] for f in world_factions_data if f.get("name") == protagonist_faction), None)
+    if protagonist_faction_id is not None:
+        home_region = next(
+            (r for r in settings.get("worldRegions", []) if r.get("factionId") == protagonist_faction_id and r.get("desc")),
+            None,
+        )
+        if home_region:
+            region_hint = f"backdrop atmosphere inspired by: {home_region['desc'][:60]}"
+
     # 세계관/갈등에서 시각 요소 힌트
     narrative_hint_parts = []
     if conflict:
@@ -616,6 +764,18 @@ def generate_cover(novel_id: str, body: dict = Body(default={}), user=Depends(ge
         narrative_hint_parts.append(f"protagonist's driving force: {goal[:60]}")
     if rel_tones:
         narrative_hint_parts.append(", ".join(dict.fromkeys(rel_tones)))  # 중복 제거
+    if faction_mood:
+        narrative_hint_parts.append(faction_mood)
+    if emotion_mood:
+        narrative_hint_parts.append(emotion_mood)
+    if cliff_visual:
+        narrative_hint_parts.append(cliff_visual)
+    if power_hint:
+        narrative_hint_parts.append(power_hint)
+    if region_hint:
+        narrative_hint_parts.append(region_hint)
+    if reference_work:
+        narrative_hint_parts.append(f"art direction evoking a mood similar to: {reference_work[:60]}")
     if world_rules:
         narrative_hint_parts.append(f"world feel: {world_rules[:80]}")
     narrative_hint = ("Story essence — " + "; ".join(narrative_hint_parts) + ".") if narrative_hint_parts else ""

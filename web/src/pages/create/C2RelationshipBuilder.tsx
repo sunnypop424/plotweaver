@@ -5,7 +5,7 @@ import { RadioPill } from "@/components/ui/RadioPill";
 import { useViewport } from "@/lib/useViewport";
 import { useCanvasDrag } from "@/lib/useCanvasDrag";
 import { useWizard } from "@/providers/WizardProvider";
-import { suggestRelations } from "@/lib/api";
+import { suggestRelations, updateNovel } from "@/lib/api";
 
 /* ── 타입 ────────────────────────────────────────────────────────────── */
 type Role = "lead" | "villain" | "support";
@@ -78,6 +78,7 @@ export default function C2RelationshipBuilder() {
   const [selectedEdgeId, setSelectedEdgeId] = useState<number | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
   const [autoLoading, setAutoLoading] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
 
   /* ── 드래그/탭 구분 + ESC (공통 훅: 노드 반지름 48) ──────────────────── */
@@ -144,17 +145,29 @@ export default function C2RelationshipBuilder() {
     setAutoLoading(true);
     clearSelection();
     try {
-      const characters = nodes.map((n) => ({
-        name: n.name,
-        role: n.role === "lead" ? "protagonist" : n.role === "villain" ? "villain" : "supporting",
-        personality: wizData.characters.find((c) => c.name === n.name)?.personality ?? "",
-        trait: wizData.characters.find((c) => c.name === n.name)?.trait ?? "",
-        appearance: "",
-      }));
+      const characters = nodes.map((n) => {
+        const src = wizData.characters.find((c) => c.name === n.name);
+        return {
+          name: n.name,
+          role: n.role === "lead" ? "protagonist" : n.role === "villain" ? "villain" : "supporting",
+          personality: src?.personality ?? "",
+          trait: src?.trait ?? "",
+          appearance: "",
+          desire: src?.desire ?? "",
+          fear: src?.fear ?? "",
+          mannerism: src?.mannerism ?? "",
+          secret: src?.secret ?? "",
+          faction: src?.faction ?? "",
+        };
+      });
       const nodeIndex = (id: number) => nodes.findIndex((n) => n.id === id);
       const existingEdges = edges
         .map((e) => ({ fromIndex: nodeIndex(e.from), toIndex: nodeIndex(e.to), relation: e.relation, direction: e.direction, timeline: e.timeline.map((t) => ({ ep: t.ep, fromLabel: t.fromLabel, toLabel: t.toLabel })) }))
         .filter((e) => e.fromIndex !== -1 && e.toIndex !== -1);
+      const factionNameById = (id: number | "") => wizData.worldFactionsData.find((f) => f.id === id)?.name ?? "";
+      const factionRelations = wizData.factionRelations
+        .map((fr) => ({ fromFaction: factionNameById(fr.fromFactionId), toFaction: factionNameById(fr.toFactionId), relation: fr.relation }))
+        .filter((fr) => fr.fromFaction && fr.toFaction);
       const res = await suggestRelations({
         characters,
         goal: wizData.goal,
@@ -163,6 +176,8 @@ export default function C2RelationshipBuilder() {
         storyFlow: wizData.storyFlow,
         prompt: prompt?.trim() || undefined,
         existingEdges: existingEdges.length ? existingEdges : undefined,
+        worldRules: wizData.worldRules || undefined,
+        factionRelations: factionRelations.length ? factionRelations : undefined,
       });
       const newEdges: Edge[] = res.edges
         .filter((e) => nodes[e.fromIndex] && nodes[e.toIndex])
@@ -182,6 +197,29 @@ export default function C2RelationshipBuilder() {
     } finally {
       setAutoLoading(false);
     }
+  };
+
+  const goNext = async () => {
+    const patch = {
+      relationships: edges.map((e) => {
+        const fn = nodes.find((n) => n.id === e.from);
+        const tn = nodes.find((n) => n.id === e.to);
+        return { fromChar: fn?.name ?? "", toChar: tn?.name ?? "", relation: e.relation, direction: e.direction, timeline: e.timeline.map((t) => ({ ep: t.ep, fromLabel: t.fromLabel, toLabel: t.toLabel })) };
+      }),
+    };
+    saveRelations(patch.relationships);
+    if (wizData.editingNovelId) {
+      setSavingEdit(true);
+      try {
+        await updateNovel(wizData.editingNovelId, { settings: { ...wizData, ...patch } });
+      } catch {
+        showToast("저장에 실패했어요");
+        setSavingEdit(false);
+        return;
+      }
+      setSavingEdit(false);
+    }
+    navigate("/create/narrative");
   };
 
   /* ── 파생 계산 ─────────────────────────────────────────────────────── */
@@ -390,10 +428,11 @@ export default function C2RelationshipBuilder() {
                 ← 이전: 기본설정
               </button>
               <button
-                onClick={() => { saveRelations(edges.map(e => { const fn = nodes.find(n => n.id === e.from); const tn = nodes.find(n => n.id === e.to); return { fromChar: fn?.name ?? "", toChar: tn?.name ?? "", relation: e.relation, direction: e.direction, timeline: e.timeline.map(t => ({ ep: t.ep, fromLabel: t.fromLabel, toLabel: t.toLabel })) }; })); navigate("/create/narrative"); }}
-                className="pw-btn-primary h-14 px-7 text-lg"
+                onClick={goNext}
+                disabled={savingEdit}
+                className="pw-btn-primary h-14 px-7 text-lg disabled:opacity-60"
               >
-                다음: 서사설정 →
+                {savingEdit ? "저장 중..." : "다음: 서사설정 →"}
               </button>
             </div>
           )}
@@ -433,7 +472,7 @@ export default function C2RelationshipBuilder() {
       {isMobile && (
         <div className="fixed inset-x-0 bottom-0 z-30 flex items-center gap-2.5 border-t border-hairline bg-white px-4 py-3 shadow-[0_-2px_12px_rgba(0,0,0,0.04)]">
           <button onClick={() => navigate("/create")} className="h-[54px] flex-shrink-0 rounded border border-line2 bg-white px-[18px] text-[15px] font-bold text-ink2">← 이전</button>
-          <button onClick={() => { saveRelations(edges.map(e => { const fn = nodes.find(n => n.id === e.from); const tn = nodes.find(n => n.id === e.to); return { fromChar: fn?.name ?? "", toChar: tn?.name ?? "", relation: e.relation, direction: e.direction, timeline: e.timeline.map(t => ({ ep: t.ep, fromLabel: t.fromLabel, toLabel: t.toLabel })) }; })); navigate("/create/narrative"); }} className="pw-btn-primary h-[54px] flex-1 text-base">다음: 서사설정 →</button>
+          <button onClick={goNext} disabled={savingEdit} className="pw-btn-primary h-[54px] flex-1 text-base disabled:opacity-60">{savingEdit ? "저장 중..." : "다음: 서사설정 →"}</button>
         </div>
       )}
 

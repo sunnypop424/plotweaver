@@ -102,6 +102,11 @@ export default function COutputWizard() {
         characters: wizData.characters,
         pov: fullPov,
         ending: wizData.ending,
+        worldFactions: wizData.worldFactions,
+        relationships: wizData.relationships.map((r) => ({ fromChar: r.fromChar, toChar: r.toChar, relation: r.relation ?? "" })),
+        emotionalGoal: wizData.emotionalGoal || undefined,
+        referenceWork: wizData.referenceWork || undefined,
+        cliffhangerStyle: wizData.cliffhangerStyle || undefined,
       });
       setCandidates(res.titles);
     } catch (e) {
@@ -368,7 +373,7 @@ export default function COutputWizard() {
           {/* DESKTOP nav */}
           {!isMobile && (
             <div className="mt-1 flex items-center justify-between gap-3.5">
-              <button onClick={() => navigate("/create/relations")} className="h-14 rounded border border-line2 bg-white px-[22px] text-base font-bold text-ink2 transition hover:border-wash-2 hover:bg-wash hover:text-brand">← 이전: 관계도</button>
+              <button onClick={() => navigate("/create/narrative")} className="h-14 rounded border border-line2 bg-white px-[22px] text-base font-bold text-ink2 transition hover:border-wash-2 hover:bg-wash hover:text-brand">← 이전: 서사</button>
               <div className="flex items-center gap-3.5">
                 {!valid && <span className="text-[13px] font-bold text-muted">필수 항목(*)을 채우면 생성할 수 있어요.</span>}
                 <button disabled={!valid || submitting} onClick={handleGenerate} className={(valid && !submitting ? "pw-btn-primary shadow-cta" : "pw-btn-disabled") + " h-14 gap-2 px-[30px] text-lg"}>{submitting ? (editingNovelId ? "저장 중..." : "작품 만드는 중...") : (editingNovelId ? "✦ 설정 저장하기" : "✦ 1회차 생성하기")}</button>
@@ -405,7 +410,7 @@ export default function COutputWizard() {
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-hairline bg-white px-4 py-3 shadow-[0_-2px_12px_rgba(0,0,0,0.04)]">
           {!valid && <div className="mb-2 text-center text-xs font-bold text-muted">필수 항목(*)을 채워주세요</div>}
           <div className="flex gap-2.5">
-            <button onClick={() => navigate("/create/relations")} className="h-[54px] flex-shrink-0 rounded border border-line2 bg-white px-[18px] text-[15px] font-bold text-ink2">← 이전</button>
+            <button onClick={() => navigate("/create/narrative")} className="h-[54px] flex-shrink-0 rounded border border-line2 bg-white px-[18px] text-[15px] font-bold text-ink2">← 이전</button>
             <button disabled={!valid || submitting} onClick={handleGenerate} className={(valid && !submitting ? "pw-btn-primary" : "pw-btn-disabled") + " h-[54px] flex-1 text-base"}>{submitting ? (editingNovelId ? "저장 중..." : "작품 만드는 중...") : (editingNovelId ? "✦ 설정 저장하기" : "✦ 1회차 생성하기")}</button>
           </div>
         </div>

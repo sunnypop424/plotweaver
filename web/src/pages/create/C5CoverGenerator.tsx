@@ -45,6 +45,12 @@ export default function C5CoverGenerator() {
         } else if (saved) {
           setStyle({ value: "", custom: true, text: saved });
         }
+        const savedTone = novel.settings?.coverTone;
+        if (savedTone && TONE_OPTIONS.includes(savedTone)) {
+          setTone({ value: savedTone, custom: false, text: "" });
+        } else if (savedTone) {
+          setTone({ value: "", custom: true, text: savedTone });
+        }
         // 기존 표지가 있으면 첫 번째로 표시
         if (novel.cover_url) {
           setCoverUrls([novel.cover_url]);
