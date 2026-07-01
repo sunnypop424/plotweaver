@@ -137,6 +137,8 @@ async def suggest_relations(body: dict = Body(...), user=Depends(get_current_use
     conflict = body.get("conflict", "")
     total_chapters = body.get("totalChapters", 10)
     story_flow = body.get("storyFlow", {})
+    user_prompt = (body.get("prompt") or "").strip()
+    existing_edges = body.get("existingEdges", [])
 
     if len(characters) < 2:
         return {"edges": []}
@@ -145,6 +147,34 @@ async def suggest_relations(body: dict = Body(...), user=Depends(get_current_use
         f"{i}. {c.get('name','?')} ({'주인공' if c.get('role')=='protagonist' else '조연/악역'}) - {c.get('personality','')}"
         for i, c in enumerate(characters)
     )
+
+    # 현재 관계도(있다면) — 프롬프트로 수정/보완할 때 기준선으로 사용
+    existing_str = ""
+    if isinstance(existing_edges, list) and existing_edges:
+        ex_lines = []
+        for e in existing_edges:
+            fi, ti = e.get("fromIndex"), e.get("toIndex")
+            if not isinstance(fi, int) or not isinstance(ti, int):
+                continue
+            if fi < 0 or ti < 0 or fi >= len(characters) or ti >= len(characters):
+                continue
+            fname = characters[fi].get("name", "?")
+            tname = characters[ti].get("name", "?")
+            arrow = "↔" if e.get("direction") == "both" else "→"
+            ex_lines.append(f"  - {fname} {arrow} {tname}: {e.get('relation', '')}")
+        if ex_lines:
+            existing_str = "\n현재 관계도 (이미 설정된 상태):\n" + "\n".join(ex_lines)
+
+    prompt_instr = ""
+    if user_prompt:
+        prompt_instr = f"""
+
+[사용자 프롬프트 — 최우선으로 반영]
+{user_prompt}
+
+- 위 지시에서 언급된 인물·관계는 그 내용을 정확히 반영해서 edges를 만드세요.
+- 지시에서 언급되지 않은 인물 쌍은 '현재 관계도'가 있으면 그대로 유지하고, 없으면 서사에 맞게 자연스럽게 새로 보완하세요.
+- 사용자가 일부만 대충 적었더라도 전체 인물의 관계도가 빠짐없이 완성되도록 나머지를 채우세요."""
 
     # 기승전결을 회차 구간으로 변환 (균등 분배)
     n = max(total_chapters, 1)
@@ -169,7 +199,7 @@ async def suggest_relations(body: dict = Body(...), user=Depends(get_current_use
 
 주인공 목표: {goal or '없음'}
 핵심 갈등: {conflict or '없음'}
-총 회차: {total_chapters}{flow_lines}
+총 회차: {total_chapters}{flow_lines}{existing_str}{prompt_instr}
 
 반드시 아래 JSON만 응답하세요:
 
@@ -197,8 +227,13 @@ async def suggest_relations(body: dict = Body(...), user=Depends(get_current_use
 - 한국어로 작성"""
 
     # 인물 수에 따라 토큰 동적 증가: 쌍 수 = N*(N-1)/2 × 약 100토큰 + 여유
+    # 프롬프트·기존 관계도가 있으면 그만큼 응답이 길어지므로 여유분 추가
     char_count = len(characters)
-    dynamic_tokens = min(500 + char_count * 400, 8000)
+    dynamic_tokens = min(800 + char_count * 600, 12000)
+    if existing_str:
+        dynamic_tokens = min(dynamic_tokens + 1500, 12000)
+    if prompt_instr:
+        dynamic_tokens = min(dynamic_tokens + 1000, 12000)
 
     try:
         msg = _ai().messages.create(
@@ -206,13 +241,18 @@ async def suggest_relations(body: dict = Body(...), user=Depends(get_current_use
             max_tokens=dynamic_tokens,
             messages=[{"role": "user", "content": prompt}],
         )
-        data = _parse_json(msg.content[0].text)
-        if not isinstance(data.get("edges"), list):
-            return {"edges": []}
-        return data
     except Exception as e:
-        logger.error("suggest_relations error: %s", e)
+        logger.error("suggest_relations API call failed: %s", e)
         raise HTTPException(status_code=500, detail="관계도 자동 생성에 실패했어요. 잠시 후 다시 시도해 주세요.")
+
+    if msg.stop_reason == "max_tokens":
+        logger.error("suggest_relations truncated at max_tokens (output=%s)", msg.usage.output_tokens)
+        raise HTTPException(status_code=502, detail="관계도가 너무 길어 생성이 중단됐어요. 인물 수를 줄이거나 프롬프트를 간결하게 줄여서 다시 시도해 주세요.")
+
+    data = _parse_json(msg.content[0].text)
+    if not isinstance(data.get("edges"), list):
+        return {"edges": []}
+    return data
 
 
 @router.post("/characters")

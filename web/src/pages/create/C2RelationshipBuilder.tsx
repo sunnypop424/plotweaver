@@ -78,6 +78,7 @@ export default function C2RelationshipBuilder() {
   const [selectedEdgeId, setSelectedEdgeId] = useState<number | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
   const [autoLoading, setAutoLoading] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState("");
 
   /* ── 드래그/탭 구분 + ESC (공통 훅: 노드 반지름 48) ──────────────────── */
   const canvasRef = useRef<HTMLDivElement | null>(null);
@@ -138,7 +139,7 @@ export default function C2RelationshipBuilder() {
   const removeTimeline = (edgeId: number, tId: number) =>
     setEdges((es) => es.map((e) => (e.id !== edgeId ? e : { ...e, timeline: e.timeline.filter((t) => t.id !== tId) })));
 
-  const autoRecommend = async () => {
+  const autoRecommend = async (prompt?: string) => {
     if (nodes.length < 2) { showToast("인물이 2명 이상 필요해요"); return; }
     setAutoLoading(true);
     clearSelection();
@@ -150,12 +151,18 @@ export default function C2RelationshipBuilder() {
         trait: wizData.characters.find((c) => c.name === n.name)?.trait ?? "",
         appearance: "",
       }));
+      const nodeIndex = (id: number) => nodes.findIndex((n) => n.id === id);
+      const existingEdges = edges
+        .map((e) => ({ fromIndex: nodeIndex(e.from), toIndex: nodeIndex(e.to), relation: e.relation, direction: e.direction, timeline: e.timeline.map((t) => ({ ep: t.ep, fromLabel: t.fromLabel, toLabel: t.toLabel })) }))
+        .filter((e) => e.fromIndex !== -1 && e.toIndex !== -1);
       const res = await suggestRelations({
         characters,
         goal: wizData.goal,
         conflict: wizData.conflict,
         totalChapters: wizData.totalChapters,
         storyFlow: wizData.storyFlow,
+        prompt: prompt?.trim() || undefined,
+        existingEdges: existingEdges.length ? existingEdges : undefined,
       });
       const newEdges: Edge[] = res.edges
         .filter((e) => nodes[e.fromIndex] && nodes[e.toIndex])
@@ -169,7 +176,7 @@ export default function C2RelationshipBuilder() {
           timeline: e.timeline.map((t) => ({ id: ++tid.current, ep: t.ep, fromLabel: t.fromLabel, toLabel: t.toLabel })),
         }));
       setEdges(newEdges);
-      showToast("AI가 인물 관계를 추천했어요");
+      showToast(prompt?.trim() ? "프롬프트로 관계도를 반영했어요" : "AI가 인물 관계를 추천했어요");
     } catch (err: unknown) {
       showToast(err instanceof Error ? err.message : "AI 생성 실패");
     } finally {
@@ -347,6 +354,30 @@ export default function C2RelationshipBuilder() {
               )
             )}
 
+          </div>
+
+          {/* AI 프롬프트로 관계 설정 */}
+          <div className="pw-card mt-4 p-4">
+            <div className="mb-1 flex items-center gap-1.5 text-sm font-bold text-ink">✦ 프롬프트로 관계 설정</div>
+            <div className="mb-2 text-[12.5px] leading-relaxed text-muted">
+              문장으로 설명하면 AI가 관계도를 만들거나 고쳐요. 예: <span className="text-ink2">"{"주인공과 라이벌은 첫사랑이었다가 배신으로 원수가 돼요. 나머지는 알아서 채워줘"}"</span>
+            </div>
+            <textarea
+              value={aiPrompt}
+              onChange={(e) => setAiPrompt(e.target.value)}
+              rows={3}
+              placeholder={"예: 주인공과 조연은 스승과 제자 관계로 시작해서 8화쯤 배신으로 틀어져요.\n마음에 안 드는 부분이 있으면 다시 여기에 어떻게 바꿀지 적어주세요."}
+              className="w-full resize-none rounded-lg border border-hairline px-3 py-2.5 text-[13px] leading-relaxed text-ink outline-none transition placeholder:text-muted/50 focus:border-brand focus:shadow-focus"
+            />
+            <div className="mt-2.5 flex justify-end">
+              <button
+                onClick={() => autoRecommend(aiPrompt)}
+                disabled={autoLoading || !enoughNodes}
+                className="pw-btn-primary h-10 px-4 text-[13px] disabled:cursor-default disabled:opacity-50"
+              >
+                {autoLoading ? "생성 중..." : edges.length > 0 ? "프롬프트로 수정하기" : aiPrompt.trim() ? "프롬프트로 관계 생성" : "자동으로 관계 채우기"}
+              </button>
+            </div>
           </div>
 
           {/* DESKTOP nav */}

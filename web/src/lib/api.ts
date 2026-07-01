@@ -175,7 +175,7 @@ export function suggestWorld(params: { era: string; genres: string[]; synopsis: 
   return request<WorldSuggestion>("POST", "/api/suggest/world", params);
 }
 
-export function suggestRelations(params: { characters: NovelSettings["characters"]; goal: string; conflict: string; totalChapters: number; storyFlow?: { 발단: string; 전개: string; 위기: string; 절정: string } }) {
+export function suggestRelations(params: { characters: NovelSettings["characters"]; goal: string; conflict: string; totalChapters: number; storyFlow?: { 발단: string; 전개: string; 위기: string; 절정: string }; prompt?: string; existingEdges?: RelationsSuggestion["edges"] }) {
   return request<RelationsSuggestion>("POST", "/api/suggest/relations", params);
 }
 
