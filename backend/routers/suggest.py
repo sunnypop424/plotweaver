@@ -3,7 +3,7 @@ AI 자동완성 제안 엔드포인트
   POST /api/suggest/world     → 세계관 (세력·계급·용어·월드맵) 자동생성
   POST /api/suggest/relations → 인물 관계도 자동생성
 """
-import json, math, os, re, logging
+import asyncio, json, math, os, re, logging
 from fastapi import APIRouter, Depends, Body, HTTPException
 from auth import get_current_user
 from db import get_db
@@ -546,31 +546,8 @@ async def suggest_title(body: dict = Body(...), user=Depends(get_current_user)):
     return _parse_json(msg.content[0].text)
 
 
-@router.post("/review")
-async def review_chapter(body: dict = Body(...), user=Depends(get_current_user)):
-    """회차 원고를 위저드 설정과 비교해 AI 검토 후 구조화된 피드백 반환."""
-    novel_id = body.get("novelId", "")
-    seq = int(body.get("seq", 1))
-    content = body.get("content", "").strip()
-
-    if not content:
-        raise HTTPException(status_code=400, detail="내용이 비어있어요")
-
-    # DB에서 작품 설정 및 이전 회차 가져오기
-    db = get_db()
-    novel_row = (
-        db.table("novels")
-        .select("title, settings")
-        .eq("id", novel_id)
-        .eq("author_id", str(user.id))
-        .single()
-        .execute()
-    )
-    if not novel_row.data:
-        raise HTTPException(status_code=404, detail="작품을 찾을 수 없습니다")
-
-    title = novel_row.data["title"]
-    settings = novel_row.data["settings"] or {}
+def _build_review_prompt(title: str, settings: dict, seq: int, content: str, prev_content: str | None, custom_instruction: str = "") -> str:
+    """회차 검토 프롬프트 생성. 단건 검토(/review)와 전체 검토(/review-all)가 공유."""
     era = settings.get("era", "")
     genres = settings.get("genres", [])
     world_rules = settings.get("worldRules", "")
@@ -602,20 +579,18 @@ async def review_chapter(body: dict = Body(...), user=Depends(get_current_user))
 
     # 이전 회차 마지막 500자 (연결성 확인)
     prev_block = ""
-    if seq > 1:
-        prev = (
-            db.table("chapters")
-            .select("content")
-            .eq("novel_id", novel_id)
-            .eq("seq", seq - 1)
-            .single()
-            .execute()
-        )
-        if prev.data and prev.data.get("content"):
-            snippet = prev.data["content"][-500:]
-            prev_block = f"\n[{seq - 1}화 마지막 부분 — 연결성 확인]\n{snippet}\n"
+    if prev_content:
+        snippet = prev_content[-500:]
+        prev_block = f"\n[{seq - 1}화 마지막 부분 — 연결성 확인]\n{snippet}\n"
 
-    prompt = f"""당신은 웹소설 검수·교정 전문가입니다. 아래 {seq}화 원고를 작품 설정과 대조해 꼼꼼히 검토하세요.
+    # 작가가 직접 입력한 추가 검토 요청사항
+    custom_block = ""
+    custom_criterion = ""
+    if custom_instruction:
+        custom_block = f"\n[작가가 추가로 요청한 검토 항목 — 반드시 반영]\n{custom_instruction}\n"
+        custom_criterion = '\n⑥ 작가 요청 사항 — 위 [작가가 추가로 요청한 검토 항목]을 기준으로 검토 (해당 이슈는 type="기타")'
+
+    return f"""당신은 웹소설 검수·교정 전문가입니다. 아래 {seq}화 원고를 작품 설정과 대조해 꼼꼼히 검토하세요.
 
 [작품 설정]
 제목: {title}
@@ -630,24 +605,24 @@ async def review_chapter(body: dict = Body(...), user=Depends(get_current_user))
 
 [인물 관계]
 {rel_str}
-{prev_block}
+{prev_block}{custom_block}
 [{seq}화 원고 (검토 대상)]
 {content[:4000]}
 
-아래 5가지를 검토하고, 반드시 JSON만 반환하세요 (설명·마크다운 없이):
+아래 항목을 검토하고, 반드시 JSON만 반환하세요 (설명·마크다운 없이):
 
 ① 시대·배경 고증 — 해당 시대·세계에 없는 단어·사물·개념·기술
 ② 인물 일관성 — 설정한 성격·말투와 다른 행동이나 대사
 ③ 문장 구조 — 어색한 표현, 과도한 반복, 읽기 불편한 문장
 ④ 대사 자연성 — 부자연스러운 한국어 대화체, 어색한 호칭
-⑤ 흐름·연결성 — 갑작스러운 전환, 논리 비약, 이전 회차와 불연속
+⑤ 흐름·연결성 — 갑작스러운 전환, 논리 비약, 이전 회차와 불연속{custom_criterion}
 
 {{
   "ok": true,
   "summary": "총평 한 줄 (30자 이내)",
   "issues": [
     {{
-      "type": "시대고증|인물일관성|문장구조|대사|흐름",
+      "type": "시대고증|인물일관성|문장구조|대사|흐름|기타",
       "severity": "error|warning|info",
       "text": "구체적 문제 설명 (1~2문장)",
       "quote": "원고에서 문제가 되는 구절을 한 문장 이내로 그대로 복사. 찾을 수 없으면 빈 문자열.",
@@ -662,6 +637,50 @@ async def review_chapter(body: dict = Body(...), user=Depends(get_current_user))
 - 문제 없으면 issues=[], ok=true
 - error 1개 이상이면 ok=false"""
 
+
+@router.post("/review")
+async def review_chapter(body: dict = Body(...), user=Depends(get_current_user)):
+    """회차 원고를 위저드 설정과 비교해 AI 검토 후 구조화된 피드백 반환."""
+    novel_id = body.get("novelId", "")
+    seq = int(body.get("seq", 1))
+    content = body.get("content", "").strip()
+    custom_instruction = (body.get("customInstruction") or "").strip()[:500]
+
+    if not content:
+        raise HTTPException(status_code=400, detail="내용이 비어있어요")
+
+    # DB에서 작품 설정 및 이전 회차 가져오기
+    db = get_db()
+    novel_row = (
+        db.table("novels")
+        .select("title, settings")
+        .eq("id", novel_id)
+        .eq("author_id", str(user.id))
+        .single()
+        .execute()
+    )
+    if not novel_row.data:
+        raise HTTPException(status_code=404, detail="작품을 찾을 수 없습니다")
+
+    title = novel_row.data["title"]
+    settings = novel_row.data["settings"] or {}
+
+    # 이전 회차 마지막 부분 (연결성 확인)
+    prev_content = None
+    if seq > 1:
+        prev = (
+            db.table("chapters")
+            .select("content")
+            .eq("novel_id", novel_id)
+            .eq("seq", seq - 1)
+            .single()
+            .execute()
+        )
+        if prev.data:
+            prev_content = prev.data.get("content")
+
+    prompt = _build_review_prompt(title, settings, seq, content, prev_content, custom_instruction)
+
     msg = _ai().messages.create(
         model="claude-sonnet-4-6",
         max_tokens=4000,
@@ -671,3 +690,86 @@ async def review_chapter(body: dict = Body(...), user=Depends(get_current_user))
         logger.error("review_chapter truncated at max_tokens (output=%s)", msg.usage.output_tokens)
         raise HTTPException(status_code=502, detail="검토 결과가 너무 길어 생성이 중단됐어요. 다시 시도해 주세요.")
     return _parse_json(msg.content[0].text)
+
+
+_REVIEW_ALL_CONCURRENCY = 4
+
+
+@router.post("/review-all")
+async def review_all_chapters(body: dict = Body(...), user=Depends(get_current_user)):
+    """작품에 저장된 모든 회차를 한 번에 AI 검토 (동시 최대 4건 병렬 처리)."""
+    novel_id = body.get("novelId", "")
+    custom_instruction = (body.get("customInstruction") or "").strip()[:500]
+    if not novel_id:
+        raise HTTPException(status_code=400, detail="novelId가 필요해요")
+
+    db = get_db()
+    novel_row = (
+        db.table("novels")
+        .select("title, settings")
+        .eq("id", novel_id)
+        .eq("author_id", str(user.id))
+        .single()
+        .execute()
+    )
+    if not novel_row.data:
+        raise HTTPException(status_code=404, detail="작품을 찾을 수 없습니다")
+    title = novel_row.data["title"]
+    settings = novel_row.data["settings"] or {}
+
+    chapters_row = (
+        db.table("chapters")
+        .select("seq, content")
+        .eq("novel_id", novel_id)
+        .order("seq")
+        .execute()
+    )
+    chapters = [c for c in (chapters_row.data or []) if (c.get("content") or "").strip()]
+    if not chapters:
+        raise HTTPException(status_code=400, detail="검토할 회차가 없어요")
+
+    sem = asyncio.Semaphore(_REVIEW_ALL_CONCURRENCY)
+    _REVIEW_ALL_RETRIES = 2  # 레이트리밋·일시적 오류(529 등) 대비 최대 2회 재시도
+
+    async def run_one(idx: int) -> dict:
+        seq = chapters[idx]["seq"]
+        content = chapters[idx]["content"].strip()
+        prev_content = chapters[idx - 1]["content"] if idx > 0 else None
+        prompt = _build_review_prompt(title, settings, seq, content, prev_content, custom_instruction)
+
+        def _call():
+            msg = _ai().messages.create(
+                model="claude-sonnet-4-6",
+                max_tokens=4000,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            if msg.stop_reason == "max_tokens":
+                raise ValueError("max_tokens")
+            return _parse_json(msg.content[0].text)
+
+        async with sem:
+            last_err: Exception | None = None
+            for attempt in range(_REVIEW_ALL_RETRIES + 1):
+                try:
+                    result = await asyncio.to_thread(_call)
+                    return {"seq": seq, **result}
+                except Exception as e:
+                    last_err = e
+                    logger.error("review_all_chapters: seq=%s attempt=%s failed: %s", seq, attempt + 1, e)
+                    if attempt < _REVIEW_ALL_RETRIES:
+                        await asyncio.sleep(1.5 * (attempt + 1))
+            return {
+                "seq": seq,
+                "ok": False,
+                "failed": True,
+                "summary": f"검토 실패 — {last_err}"[:60] if last_err else "검토 실패",
+                "issues": [],
+            }
+
+    results = list(await asyncio.gather(*(run_one(i) for i in range(len(chapters)))))
+    results.sort(key=lambda r: r["seq"])
+    total_critical = sum(
+        1 for r in results for i in r.get("issues", []) if i.get("severity") != "info"
+    )
+    failed_seqs = [r["seq"] for r in results if r.get("failed")]
+    return {"results": results, "totalCritical": total_critical, "failedSeqs": failed_seqs}

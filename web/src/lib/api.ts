@@ -217,6 +217,15 @@ export interface ReviewResult {
   issues: ReviewIssue[];
 }
 
-export function reviewChapter(novelId: string, seq: number, content: string) {
-  return request<ReviewResult>("POST", "/api/suggest/review", { novelId, seq, content });
+export function reviewChapter(novelId: string, seq: number, content: string, customInstruction?: string) {
+  return request<ReviewResult>("POST", "/api/suggest/review", { novelId, seq, content, customInstruction });
+}
+
+export interface ChapterReviewResult extends ReviewResult {
+  seq: number;
+  failed?: boolean;
+}
+
+export function reviewAllChapters(novelId: string, customInstruction?: string) {
+  return request<{ results: ChapterReviewResult[]; totalCritical: number; failedSeqs: number[] }>("POST", "/api/suggest/review-all", { novelId, customInstruction });
 }
